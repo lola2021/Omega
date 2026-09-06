@@ -39,10 +39,9 @@ CONFIG_PACKAGE_kmod-usb-core=y
 CONFIG_PACKAGE_kmod-usb2=y
 CONFIG_PACKAGE_kmod-usb3=y
 
-# Dual PCIe Wi-Fi 6 Subsystems (MT7915 2.4GHz + MT7916 5GHz 160MHz)
+# Wireless Subsystem (MT7915 Wi-Fi 6 DBDC)
 CONFIG_PACKAGE_kmod-mt7915e=y
 CONFIG_PACKAGE_mt7915-firmware=y
-CONFIG_PACKAGE_mt7916-firmware=y
 CONFIG_PACKAGE_wpad-basic-mbedtls=y
 
 # Utilities & Modem Tinkering (ROOter parity)
