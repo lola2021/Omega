@@ -26,7 +26,7 @@ on:
 
 jobs:
   build:
-    name: Build Firmware (Kernel 6.6 / MT7621)
+    name: Build Firmware (Kernel 6.12 / MT7621)
     runs-on: ubuntu-24.04
 
     steps:
@@ -73,21 +73,7 @@ jobs:
             git -C openwrt apply ../target_patches/0001-ramips-mt7621-add-mesh-mk01k21.patch
           else
             echo "Patch offset detected, appending Device/mesh_mk01k21 to mt7621.mk directly..."
-            cat << 'EOF' >> openwrt/target/linux/ramips/image/mt7621.mk
-
-define Device/mesh_mk01k21
-  $(Device/dsa-migration)
-  $(Device/uimage-lzma-loader)
-  IMAGE_SIZE := 16064k
-  DEVICE_VENDOR := Mesh
-  DEVICE_MODEL := MK01K21
-  DEVICE_COMPAT := mesh,mk01k21
-  DEVICE_PACKAGES := kmod-mt7915e mt7915-firmware kmod-usb3 \
-	kmod-usb-net-cdc-mbim kmod-usb-net-qmi-wwan umbim uqmi usb-modeswitch \
-	kmod-usb-serial-option kmod-usb-serial-wwan kmod-nft-mangle
-endef
-TARGET_DEVICES += mesh_mk01k21
-EOF
+            printf "\ndefine Device/mesh_mk01k21\n  \$(Device/dsa-migration)\n  \$(Device/uimage-lzma-loader)\n  IMAGE_SIZE := 16064k\n  DEVICE_VENDOR := Mesh\n  DEVICE_MODEL := MK01K21\n  DEVICE_COMPAT := mesh,mk01k21\n  DEVICE_PACKAGES := kmod-mt7915e mt7915-firmware kmod-usb3 kmod-usb-net-cdc-mbim kmod-usb-net-qmi-wwan umbim uqmi usb-modeswitch kmod-usb-serial-option kmod-usb-serial-wwan kmod-nft-mangle\nendef\nTARGET_DEVICES += mesh_mk01k21\n" >> openwrt/target/linux/ramips/image/mt7621.mk
           fi
 
           echo "=== Injecting Runtime Files Overlay ==="
@@ -149,7 +135,7 @@ EOF
         uses: softprops/action-gh-release@v2
         with:
           tag_name: openwrt-25.12-mk01k21-${{ github.run_number }}
-          name: OpenWrt 25.12 for Mesh MK01K21 (Kernel 6.6)
+          name: OpenWrt 25.12 for Mesh MK01K21 (Kernel 6.12)
           files: release_artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
