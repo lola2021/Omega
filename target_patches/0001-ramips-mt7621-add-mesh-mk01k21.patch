@@ -1,0 +1,22 @@
+--- a/target/linux/ramips/image/mt7621.mk
++++ b/target/linux/ramips/image/mt7621.mk
+@@ -1020,6 +1020,19 @@ define Device/mediatek_mt7621-eval-board
+ endef
+ TARGET_DEVICES += mediatek_mt7621-eval-board
+ 
++define Device/mesh_mk01k21
++  $(Device/dsa-migration)
++  $(Device/uimage-lzma-loader)
++  IMAGE_SIZE := 16064k
++  DEVICE_VENDOR := Mesh
++  DEVICE_MODEL := MK01K21
++  DEVICE_COMPAT := mesh,mk01k21
++  DEVICE_PACKAGES := kmod-mt7915e mt7915-firmware kmod-usb3 \
++	kmod-usb-net-cdc-mbim umbim usb-modeswitch \
++	kmod-usb-serial-option kmod-usb-serial-wwan
++endef
++TARGET_DEVICES += mesh_mk01k21
++
+ define Device/mercusys_mr70x-v1
+   $(Device/dsa-migration)
+   DEVICE_VENDOR := MERCUSYS

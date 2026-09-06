@@ -1,0 +1,72 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/modem-power
+# Controls modem power on MT7621 GPIO 6 for Mesh MK01K21
+
+START=15
+STOP=90
+
+MODEM_GPIO=6
+
+get_gpio_base() {
+	for chip in /sys/class/gpio/gpiochip*; do
+		[ -d "$chip" ] || continue
+		local label="$(cat "$chip/label" 2>/dev/null)"
+		case "$label" in
+			*mt7621*|*1e000600.gpio*|*mtk*|*gpio*)
+				cat "$chip/base" 2>/dev/null
+				return 0
+				;;
+		esac
+	done
+	echo 0
+}
+
+power_on() {
+	echo "Powering ON cellular modem (GPIO $MODEM_GPIO)..."
+	local base=$(get_gpio_base)
+	local pin=$((base + MODEM_GPIO))
+
+	if [ ! -d "/sys/class/gpio/gpio$pin" ]; then
+		echo "$pin" > /sys/class/gpio/export 2>/dev/null
+	fi
+
+	echo "out" > "/sys/class/gpio/gpio$pin/direction" 2>/dev/null
+	echo "1" > "/sys/class/gpio/gpio$pin/value" 2>/dev/null
+
+	# Alternatively, if gpiod tools are present:
+	if command -v gpioset >/dev/null 2>&1; then
+		gpioset -l 0 $MODEM_GPIO=1 2>/dev/null
+	fi
+}
+
+power_off() {
+	echo "Powering OFF cellular modem (GPIO $MODEM_GPIO)..."
+	local base=$(get_gpio_base)
+	local pin=$((base + MODEM_GPIO))
+
+	if [ ! -d "/sys/class/gpio/gpio$pin" ]; then
+		echo "$pin" > /sys/class/gpio/export 2>/dev/null
+	fi
+
+	echo "out" > "/sys/class/gpio/gpio$pin/direction" 2>/dev/null
+	echo "0" > "/sys/class/gpio/gpio$pin/value" 2>/dev/null
+
+	if command -v gpioset >/dev/null 2>&1; then
+		gpioset -l 0 $MODEM_GPIO=0 2>/dev/null
+	fi
+}
+
+start() {
+	power_on
+}
+
+stop() {
+	power_off
+}
+
+restart() {
+	echo "Power cycling cellular modem..."
+	power_off
+	sleep 2
+	power_on
+}

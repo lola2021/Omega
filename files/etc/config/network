@@ -1,0 +1,46 @@
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option ula_prefix 'fd00::/48'
+
+config device 'br-lan'
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'lan1'
+	list ports 'lan2'
+	list ports 'lan3'
+	list ports 'lan4'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ipaddr '192.168.1.1'
+	option netmask '255.255.255.0'
+	option ip6assign '60'
+
+config interface 'wan'
+	option device 'wan'
+	option proto 'dhcp'
+	option metric '20'
+
+config interface 'wan6'
+	option device 'wan'
+	option proto 'dhcpv6'
+	option metric '20'
+
+# ==============================================================================
+# MBIM Cellular Interface Configuration
+# ==============================================================================
+config interface 'wan_cellular'
+	option proto 'mbim'
+	option device '/dev/cdc-wdm0'
+	option apn 'internet'
+	option pdptype 'ip'
+	option metric '10'
+	option auto '1'
+	option peerdns '1'
+	option defaultroute '1'

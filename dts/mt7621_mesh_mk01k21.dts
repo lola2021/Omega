@@ -1,0 +1,222 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/dts-v1/;
+
+#include "mt7621.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	compatible = "mesh,mk01k21", "mediatek,mt7621-soc";
+	model = "Mesh MK01K21";
+
+	aliases {
+		led-boot = &led_system;
+		led-failsafe = &led_system;
+		led-running = &led_system;
+		led-upgrade = &led_system;
+		label-mac-device = &gmac0;
+	};
+
+	chosen {
+		bootargs = "console=ttyS0,115200";
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x10000000>; /* 256MB DDR3 */
+	};
+
+	/*
+	 * Modem Power Supply (GPIO 6):
+	 * Regulates 3.3V / 3.8V rail feeding the internal M.2 / mPCIe WWAN slot.
+	 * Handled as regulator-fixed so Linux PM and drivers power it on at boot.
+	 */
+	reg_modem: regulator-modem {
+		compatible = "regulator-fixed";
+		regulator-name = "modem_power";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio 6 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	keys {
+		compatible = "gpio-keys";
+
+		/*
+		 * Reset button connected to GPIO 18 (Active LOW).
+		 * IMPORTANT: Pin 18 belongs to the "sdhci" pin group.
+		 * "sdhci" must be muxed to function "gpio" in &state_default below.
+		 */
+		key-reset {
+			label = "reset";
+			gpios = <&gpio 18 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led_system: system {
+			function = LED_FUNCTION_STATUS;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
+		};
+
+		cellular {
+			function = LED_FUNCTION_WAN;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&gpio 8 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+/*
+ * ============================================================================
+ * Critical MT7621 Pinctrl Fix for Linux Kernel 6.6 / OpenWrt 25.12:
+ * ============================================================================
+ * 1. "rgmii2" (GPIO 22-33):
+ *    On MT7621, pins 22-33 are shared between GMAC1 (RGMII2) and GPIOs.
+ *    In designs utilizing single GMAC0 connected to internal MT7530 switch,
+ *    unmuxed RGMII2 pins remain active under GMAC1 control, radiating clock
+ *    interference, causing electrical contention on adjacent lines, and
+ *    inducing packet drops on the TRGMII/RGMII1 CPU port. Muxing "rgmii2" to
+ *    "gpio" releases these lines cleanly.
+ *
+ * 2. "sdhci" (GPIO 18-21):
+ *    Pin 18 (the reset button) is mapped to the SDXC/SDHCI controller. If "sdhci"
+ *    remains un-muxed, GPIO 18 cannot be acquired by the gpio-keys driver.
+ *    Explicitly muxing "sdhci" to "gpio" enables GPIO 18 input interrupts.
+ */
+&state_default {
+	gpio {
+		groups = "i2c", "uart2", "uart3", "rgmii2", "sdhci", "wdt";
+		function = "gpio";
+	};
+};
+
+&spi0 {
+	status = "okay";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "u-boot";
+				reg = <0x00000000 0x00030000>; /* 192KB */
+				read-only;
+			};
+
+			partition@30000 {
+				label = "u-boot-env";
+				reg = <0x00030000 0x00010000>; /* 64KB */
+				read-only;
+			};
+
+			factory: partition@40000 {
+				label = "factory";
+				reg = <0x00040000 0x00010000>; /* 64KB calibration data */
+				read-only;
+
+				/* Linux 6.6 modern nvmem-layout syntax */
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					macaddr_factory_4: macaddr@4 {
+						reg = <0x4 0x6>;
+					};
+
+					macaddr_factory_2e: macaddr@2e {
+						reg = <0x2e 0x6>;
+					};
+
+					eeprom_factory_0: eeprom@0 {
+						reg = <0x0 0x1000>;
+					};
+				};
+			};
+
+			/*
+			 * 16MB Total Flash (0x1000000) - 256KB Bootloader/Factory (0x50000)
+			 * Total Available for Kernel + Squashfs Rootfs: 16064KB (0xfb0000)
+			 */
+			partition@50000 {
+				compatible = "openwrt,uimage", "denx,uimage";
+				label = "firmware";
+				reg = <0x00050000 0x00fb0000>;
+			};
+		};
+	};
+};
+
+&gmac0 {
+	nvmem-cells = <&macaddr_factory_4>;
+	nvmem-cell-names = "mac-address";
+};
+
+&switch0 {
+	ports {
+		port@0 {
+			status = "okay";
+			label = "lan1";
+		};
+
+		port@1 {
+			status = "okay";
+			label = "lan2";
+		};
+
+		port@2 {
+			status = "okay";
+			label = "lan3";
+		};
+
+		port@3 {
+			status = "okay";
+			label = "lan4";
+		};
+
+		port@4 {
+			status = "okay";
+			label = "wan";
+			nvmem-cells = <&macaddr_factory_4>;
+			nvmem-cell-names = "mac-address";
+			mac-address-increment = <1>;
+		};
+	};
+};
+
+/* Enable MT7621 USB 3.0 / 2.0 Host Controller for MBIM Modem */
+&xhci {
+	status = "okay";
+};
+
+/* Enable PCIe Controller for MT7915 Wi-Fi 6 card */
+&pcie {
+	status = "okay";
+};
+
+&pcie0 {
+	status = "okay";
+
+	wifi@0,0 {
+		compatible = "mediatek,mt76";
+		reg = <0x0000 0 0 0 0>;
+		nvmem-cells = <&eeprom_factory_0>, <&macaddr_factory_2e>;
+		nvmem-cell-names = "eeprom", "mac-address";
+	};
+};
