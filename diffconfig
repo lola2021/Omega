@@ -1,25 +1,27 @@
-# OpenWrt 25.12 Target Configuration for Mesh MK01K21
+# OpenWrt 25.12 Target Configuration for Mesh MK01K21 (AlwayWireless 5G CPE)
 CONFIG_TARGET_ramips=y
 CONFIG_TARGET_ramips_mt7621=y
 CONFIG_TARGET_ramips_mt7621_DEVICE_mesh_mk01k21=y
 
-# 16MB Flash Size Optimization
+# 16MB Flash Footprint Optimization
 CONFIG_STRIP_KERNEL_EXPORTS=y
 # CONFIG_KERNEL_KALLSYMS is not set
 # CONFIG_KERNEL_DEBUG_FS is not set
-# CONFIG_PACKAGE_kmod-ipt-conntrack-extra is not set
 CONFIG_TARGET_ROOTFS_SQUASHFS=y
 CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=256
 
-# LuCI Web Interface & MBIM protocol handler
+# LuCI Web Interface & Protocol Handlers
 CONFIG_PACKAGE_luci=y
 CONFIG_PACKAGE_luci-proto-mbim=y
+CONFIG_PACKAGE_luci-proto-qmi=y
 CONFIG_PACKAGE_luci-theme-bootstrap=y
 CONFIG_PACKAGE_luci-app-firewall=y
 
-# Cellular Modem & Protocol Stack
+# Cellular & Modem Stack (Quectel RM520N-GL: MBIM & QMI support)
 CONFIG_PACKAGE_umbim=y
+CONFIG_PACKAGE_uqmi=y
 CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
+CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
 CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y
 CONFIG_PACKAGE_kmod-usb-wdm=y
 CONFIG_PACKAGE_kmod-usb-serial=y
@@ -29,14 +31,18 @@ CONFIG_PACKAGE_usb-modeswitch=y
 CONFIG_PACKAGE_chat=y
 CONFIG_PACKAGE_comgt=y
 
+# Firewall & TTL/Hop-Limit Mangling (Hotspot / Tethering bypass)
+CONFIG_PACKAGE_kmod-nft-mangle=y
+
 # USB 3.0 / 2.0 Host Support
 CONFIG_PACKAGE_kmod-usb-core=y
 CONFIG_PACKAGE_kmod-usb2=y
 CONFIG_PACKAGE_kmod-usb3=y
 
-# Wireless Subsystem (MT7915 Wi-Fi 6)
+# Dual PCIe Wi-Fi 6 Subsystems (MT7915 2.4GHz + MT7916 5GHz 160MHz)
 CONFIG_PACKAGE_kmod-mt7915e=y
 CONFIG_PACKAGE_mt7915-firmware=y
+CONFIG_PACKAGE_mt7916-firmware=y
 CONFIG_PACKAGE_wpad-basic-mbedtls=y
 
 # Utilities

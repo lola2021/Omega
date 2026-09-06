@@ -30,7 +30,7 @@
 
 	/*
 	 * Modem Power Supply (GPIO 6 Active HIGH):
-	 * Controls power to the 5G WWAN M.2 module.
+	 * Powers the Quectel RM520N-GL 5G M.2 module.
 	 */
 	reg_modem: regulator-modem {
 		compatible = "regulator-fixed";
@@ -43,7 +43,7 @@
 		regulator-boot-on;
 	};
 
-	/* Keys identified from live debug/gpio */
+	/* Keys confirmed from live debug/gpio */
 	keys {
 		compatible = "gpio-keys";
 
@@ -66,7 +66,7 @@
 		};
 	};
 
-	/* LEDs identified from live debug/gpio */
+	/* LEDs confirmed from live debug/gpio */
 	leds {
 		compatible = "gpio-leds";
 
@@ -109,8 +109,8 @@
 
 /*
  * Critical MT7621 Pinctrl Fix:
- * - "rgmii2" (GPIO 22-33): Muxed to "gpio" to eliminate GMAC1 interference with switch GMAC0.
- * - "sdhci" (GPIO 18-21): Muxed to "gpio" so GPIO 18 (reset) and GPIO 19 receive interrupts.
+ * - "rgmii2" (GPIO 22-33): Muxed to "gpio" to eliminate GMAC1 clock noise and switch contention.
+ * - "sdhci" (GPIO 18-21): Muxed to "gpio" so GPIO 18 (reset) and GPIO 19 function.
  * - "i2c", "uart2", "uart3", "wdt": Released for LEDs and buttons.
  */
 &state_default {
@@ -147,7 +147,7 @@
 
 			factory: partition@40000 {
 				label = "factory";
-				reg = <0x00040000 0x00010000>; /* 64KB */
+				reg = <0x00040000 0x00010000>; /* 64KB calibration data */
 				read-only;
 
 				nvmem-layout {
@@ -160,11 +160,12 @@
 						reg = <0xc00 0x6>;
 					};
 
-					/* MT7915 / MT7916 EEPROM calibration cells */
+					/* MT7915 (2.4GHz) calibration data */
 					eeprom_factory_0: eeprom@0 {
 						reg = <0x0 0x1000>;
 					};
 
+					/* MT7916 (5GHz 160MHz) calibration data */
 					eeprom_factory_8000: eeprom@8000 {
 						reg = <0x8000 0x1000>;
 					};
@@ -186,7 +187,7 @@
 };
 
 /*
- * Exact 3-Port DSA Switch Map confirmed from OEM / ROOter live system:
+ * Exact 3-Port DSA Switch Layout:
  * - Port 0: wan (eth0 port 0, MAC + 1)
  * - Port 1: lan2 (eth0 port 1)
  * - Port 2: lan1 (eth0 port 2)
@@ -222,16 +223,17 @@
 	};
 };
 
-/* USB 3.0 / 2.0 Host Controller for 5G Modem */
+/* USB 3.0 / 2.0 Host Controller for Quectel RM520N-GL */
 &xhci {
 	status = "okay";
 };
 
-/* PCIe Controller for MT7915 / MT7916 Wi-Fi */
+/* Enable PCIe Controller */
 &pcie {
 	status = "okay";
 };
 
+/* PCIE0: MT7915 (2.4GHz Wi-Fi 6) */
 &pcie0 {
 	status = "okay";
 
@@ -240,5 +242,18 @@
 		reg = <0x0000 0 0 0 0>;
 		nvmem-cells = <&eeprom_factory_0>, <&macaddr_factory_c00>;
 		nvmem-cell-names = "eeprom", "mac-address";
+	};
+};
+
+/* PCIE1: MT7916 (5GHz 160MHz Wi-Fi 6) */
+&pcie1 {
+	status = "okay";
+
+	wifi@0,0 {
+		compatible = "mediatek,mt76";
+		reg = <0x0000 0 0 0 0>;
+		nvmem-cells = <&eeprom_factory_8000>, <&macaddr_factory_c00>;
+		nvmem-cell-names = "eeprom", "mac-address";
+		mac-address-increment = <2>;
 	};
 };

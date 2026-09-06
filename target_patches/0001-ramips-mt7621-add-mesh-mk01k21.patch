@@ -11,9 +11,9 @@
 +  DEVICE_VENDOR := Mesh
 +  DEVICE_MODEL := MK01K21
 +  DEVICE_COMPAT := mesh,mk01k21
-+  DEVICE_PACKAGES := kmod-mt7915e mt7915-firmware kmod-usb3 \
-+	kmod-usb-net-cdc-mbim umbim usb-modeswitch \
-+	kmod-usb-serial-option kmod-usb-serial-wwan
++  DEVICE_PACKAGES := kmod-mt7915e mt7915-firmware mt7916-firmware kmod-usb3 \
++	kmod-usb-net-cdc-mbim kmod-usb-net-qmi-wwan umbim uqmi usb-modeswitch \
++	kmod-usb-serial-option kmod-usb-serial-wwan kmod-nft-mangle
 +endef
 +TARGET_DEVICES += mesh_mk01k21
 +
