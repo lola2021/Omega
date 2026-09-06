@@ -9,7 +9,7 @@
 
 / {
 	compatible = "mesh,mk01k21", "mediatek,mt7621-soc";
-	model = "Mesh MK01K21 (AlwayWireless 5G CPE)";
+	model = "Mesh MK01K21";
 
 	aliases {
 		led-boot = &led_top_5gblue;
@@ -28,10 +28,7 @@
 		reg = <0x00000000 0x10000000>; /* 256MB DDR3 */
 	};
 
-	/*
-	 * Modem Power Supply (GPIO 6 Active HIGH):
-	 * Powers the Quectel RM520N-GL 5G M.2 module.
-	 */
+	/* Modem Power Supply (GPIO 6 Active HIGH) */
 	reg_modem: regulator-modem {
 		compatible = "regulator-fixed";
 		regulator-name = "modem_power";
@@ -43,79 +40,89 @@
 		regulator-boot-on;
 	};
 
-	/* Keys confirmed from live debug/gpio */
+	/* OEM gpio-export compatibility node */
+	gpio-export {
+		compatible = "gpio-export";
+
+		gpio_pcie0_power {
+			gpio-export,output = <0>;
+			gpios = <&gpio 6 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	/* Keys identical to OEM DTS */
 	keys {
 		compatible = "gpio-keys";
 
-		key-reset {
+		reset {
 			label = "reset";
 			gpios = <&gpio 18 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_RESTART>;
 		};
 
-		key-wps {
+		wps {
 			label = "wps";
 			gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_WPS_BUTTON>;
 		};
 
-		key-rfkill {
+		rfkill {
 			label = "rfkill";
 			gpios = <&gpio 12 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_RFKILL>;
 		};
 	};
 
-	/* LEDs confirmed from live debug/gpio */
+	/* LEDs identical to OEM DTS */
 	leds {
 		compatible = "gpio-leds";
+
+		led_top_5gblue: status {
+			label = "top:5gblue";
+			gpios = <&gpio 14 GPIO_ACTIVE_LOW>;
+		};
+
+		led_top_5gred: 5gred {
+			label = "top:5gred";
+			gpios = <&gpio 15 GPIO_ACTIVE_HIGH>;
+		};
 
 		wifi {
 			label = "blue:wifi";
 			gpios = <&gpio 0 GPIO_ACTIVE_HIGH>;
 		};
 
-		led_5gblue: 5gblue {
-			label = "blue:5g";
+		5gblue {
+			label = "led:5gblue";
 			gpios = <&gpio 9 GPIO_ACTIVE_HIGH>;
 		};
 
-		led_4gblue: 4gblue {
-			label = "blue:4g";
+		5gorange {
+			label = "led:5gorange";
+			gpios = <&gpio 13 GPIO_ACTIVE_HIGH>;
+		};
+
+		4gblue {
+			label = "led:4gblue";
 			gpios = <&gpio 11 GPIO_ACTIVE_HIGH>;
 		};
 
-		led_5gorange: 5gorange {
-			label = "orange:5g";
-			gpios = <&gpio 13 GPIO_ACTIVE_LOW>;
-		};
-
-		led_top_5gblue: top_5gblue {
-			label = "blue:top5g";
-			gpios = <&gpio 14 GPIO_ACTIVE_LOW>;
-		};
-
-		led_top_5gred: top_5gred {
-			label = "red:top5g";
-			gpios = <&gpio 15 GPIO_ACTIVE_LOW>;
-		};
-
-		led_4gorange: 4gorange {
-			label = "orange:4g";
-			gpios = <&gpio 17 GPIO_ACTIVE_LOW>;
+		4gorange {
+			label = "led:4gorange";
+			gpios = <&gpio 17 GPIO_ACTIVE_HIGH>;
 		};
 	};
 };
 
 /*
- * Critical MT7621 Pinctrl Fix:
- * - "rgmii2" (GPIO 22-33): Muxed to "gpio" to eliminate GMAC1 clock noise and switch contention.
- * - "sdhci" (GPIO 18-21): Muxed to "gpio" so GPIO 18 (reset) and GPIO 19 function.
- * - "i2c", "uart2", "uart3", "wdt": Released for LEDs and buttons.
+ * Critical MT7621 Pinctrl:
+ * - "rgmii2" (GPIO 22-33): Muxed to "gpio" to eliminate GMAC1 interference with switch GMAC0.
+ * - "sdhci" (GPIO 18-21): Muxed to "gpio" so GPIO 18 (reset button) works.
+ * - "wdt", "jtag", "uart3": Muxed to "gpio" matching OEM behavior.
  */
 &state_default {
 	gpio {
-		groups = "i2c", "uart2", "uart3", "rgmii2", "sdhci", "wdt";
+		groups = "i2c", "uart2", "uart3", "rgmii2", "sdhci", "wdt", "jtag";
 		function = "gpio";
 	};
 };
@@ -159,16 +166,6 @@
 					macaddr_factory_c00: macaddr@c00 {
 						reg = <0xc00 0x6>;
 					};
-
-					/* MT7915 (2.4GHz) calibration data */
-					eeprom_factory_0: eeprom@0 {
-						reg = <0x0 0x1000>;
-					};
-
-					/* MT7916 (5GHz 160MHz) calibration data */
-					eeprom_factory_8000: eeprom@8000 {
-						reg = <0x8000 0x1000>;
-					};
 				};
 			};
 
@@ -187,10 +184,10 @@
 };
 
 /*
- * Exact 3-Port DSA Switch Layout:
- * - Port 0: wan (eth0 port 0, MAC + 1)
- * - Port 1: lan2 (eth0 port 1)
- * - Port 2: lan1 (eth0 port 2)
+ * Exact 3-Port DSA Switch Map (confirmed from OEM DTS):
+ * - Port 0: wan (MAC at 0xc00 + 1)
+ * - Port 1: lan2
+ * - Port 2: lan1
  * - Port 3, 4: Disabled
  */
 &switch0 {
@@ -228,32 +225,30 @@
 	status = "okay";
 };
 
-/* Enable PCIe Controller */
+/* PCIe Controller with OEM reset-gpios (GPIO 19 Active LOW) */
 &pcie {
 	status = "okay";
+	reset-gpios = <&gpio 19 GPIO_ACTIVE_LOW>;
 };
 
-/* PCIE0: MT7915 (2.4GHz Wi-Fi 6) */
 &pcie0 {
 	status = "okay";
 
 	wifi@0,0 {
 		compatible = "mediatek,mt76";
 		reg = <0x0000 0 0 0 0>;
-		nvmem-cells = <&eeprom_factory_0>, <&macaddr_factory_c00>;
-		nvmem-cell-names = "eeprom", "mac-address";
+		nvmem-cells = <&macaddr_factory_c00>;
+		nvmem-cell-names = "mac-address";
 	};
 };
 
-/* PCIE1: MT7916 (5GHz 160MHz Wi-Fi 6) */
 &pcie1 {
 	status = "okay";
 
 	wifi@0,0 {
 		compatible = "mediatek,mt76";
 		reg = <0x0000 0 0 0 0>;
-		nvmem-cells = <&eeprom_factory_8000>, <&macaddr_factory_c00>;
-		nvmem-cell-names = "eeprom", "mac-address";
-		mac-address-increment = <2>;
+		nvmem-cells = <&macaddr_factory_c00>;
+		nvmem-cell-names = "mac-address";
 	};
 };
