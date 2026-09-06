@@ -237,8 +237,6 @@
 	wifi@0,0 {
 		compatible = "mediatek,mt76";
 		reg = <0x0000 0 0 0 0>;
-		nvmem-cells = <&macaddr_factory_c00>;
-		nvmem-cell-names = "mac-address";
 	};
 };
 
@@ -248,7 +246,5 @@
 	wifi@0,0 {
 		compatible = "mediatek,mt76";
 		reg = <0x0000 0 0 0 0>;
-		nvmem-cells = <&macaddr_factory_c00>;
-		nvmem-cell-names = "mac-address";
 	};
 };
