@@ -109,16 +109,17 @@ jobs:
 
       - name: Organize Artifacts
         run: |
-          mkdir -p release_artifacts
-          cd openwrt/bin/targets/ramips/mt7621/
-          
-          # Copy firmware images matching mk01k21
-          cp *mk01k21* ../../../../release_artifacts/ 2>/dev/null || true
-          # Copy buildinfo and manifest
-          cp config.buildinfo ../../../../release_artifacts/ 2>/dev/null || true
-          cp *.manifest ../../../../release_artifacts/ 2>/dev/null || true
+          DEST="$GITHUB_WORKSPACE/release_artifacts"
+          BINDIR="$GITHUB_WORKSPACE/openwrt/bin/targets/ramips/mt7621"
+          mkdir -p "$DEST"
 
-          cd ../../../../release_artifacts/
+          # Copy firmware images matching mk01k21
+          cp "$BINDIR"/*mk01k21* "$DEST/" 2>/dev/null || true
+          # Copy buildinfo and manifest
+          cp "$BINDIR"/config.buildinfo "$DEST/" 2>/dev/null || true
+          cp "$BINDIR"/*.manifest "$DEST/" 2>/dev/null || true
+
+          cd "$DEST"
           sha256sum * > SHA256SUMS.txt
           echo "Generated Artifacts:"
           ls -lh
