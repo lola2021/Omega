@@ -9,13 +9,13 @@
 
 / {
 	compatible = "mesh,mk01k21", "mediatek,mt7621-soc";
-	model = "Mesh MK01K21";
+	model = "Mesh MK01K21 (AlwayWireless 5G CPE)";
 
 	aliases {
-		led-boot = &led_system;
-		led-failsafe = &led_system;
-		led-running = &led_system;
-		led-upgrade = &led_system;
+		led-boot = &led_top_5gblue;
+		led-failsafe = &led_top_5gred;
+		led-running = &led_top_5gblue;
+		led-upgrade = &led_top_5gred;
 		label-mac-device = &gmac0;
 	};
 
@@ -29,9 +29,8 @@
 	};
 
 	/*
-	 * Modem Power Supply (GPIO 6):
-	 * Regulates 3.3V / 3.8V rail feeding the internal M.2 / mPCIe WWAN slot.
-	 * Handled as regulator-fixed so Linux PM and drivers power it on at boot.
+	 * Modem Power Supply (GPIO 6 Active HIGH):
+	 * Controls power to the 5G WWAN M.2 module.
 	 */
 	reg_modem: regulator-modem {
 		compatible = "regulator-fixed";
@@ -44,54 +43,75 @@
 		regulator-boot-on;
 	};
 
+	/* Keys identified from live debug/gpio */
 	keys {
 		compatible = "gpio-keys";
 
-		/*
-		 * Reset button connected to GPIO 18 (Active LOW).
-		 * IMPORTANT: Pin 18 belongs to the "sdhci" pin group.
-		 * "sdhci" must be muxed to function "gpio" in &state_default below.
-		 */
 		key-reset {
 			label = "reset";
 			gpios = <&gpio 18 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_RESTART>;
 		};
+
+		key-wps {
+			label = "wps";
+			gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_WPS_BUTTON>;
+		};
+
+		key-rfkill {
+			label = "rfkill";
+			gpios = <&gpio 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RFKILL>;
+		};
 	};
 
+	/* LEDs identified from live debug/gpio */
 	leds {
 		compatible = "gpio-leds";
 
-		led_system: system {
-			function = LED_FUNCTION_STATUS;
-			color = <LED_COLOR_ID_BLUE>;
-			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
+		wifi {
+			label = "blue:wifi";
+			gpios = <&gpio 0 GPIO_ACTIVE_HIGH>;
 		};
 
-		cellular {
-			function = LED_FUNCTION_WAN;
-			color = <LED_COLOR_ID_GREEN>;
-			gpios = <&gpio 8 GPIO_ACTIVE_LOW>;
+		led_5gblue: 5gblue {
+			label = "blue:5g";
+			gpios = <&gpio 9 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_4gblue: 4gblue {
+			label = "blue:4g";
+			gpios = <&gpio 11 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_5gorange: 5gorange {
+			label = "orange:5g";
+			gpios = <&gpio 13 GPIO_ACTIVE_LOW>;
+		};
+
+		led_top_5gblue: top_5gblue {
+			label = "blue:top5g";
+			gpios = <&gpio 14 GPIO_ACTIVE_LOW>;
+		};
+
+		led_top_5gred: top_5gred {
+			label = "red:top5g";
+			gpios = <&gpio 15 GPIO_ACTIVE_LOW>;
+		};
+
+		led_4gorange: 4gorange {
+			label = "orange:4g";
+			gpios = <&gpio 17 GPIO_ACTIVE_LOW>;
 		};
 	};
 };
 
 /*
- * ============================================================================
- * Critical MT7621 Pinctrl Fix for Linux Kernel 6.6 / OpenWrt 25.12:
- * ============================================================================
- * 1. "rgmii2" (GPIO 22-33):
- *    On MT7621, pins 22-33 are shared between GMAC1 (RGMII2) and GPIOs.
- *    In designs utilizing single GMAC0 connected to internal MT7530 switch,
- *    unmuxed RGMII2 pins remain active under GMAC1 control, radiating clock
- *    interference, causing electrical contention on adjacent lines, and
- *    inducing packet drops on the TRGMII/RGMII1 CPU port. Muxing "rgmii2" to
- *    "gpio" releases these lines cleanly.
- *
- * 2. "sdhci" (GPIO 18-21):
- *    Pin 18 (the reset button) is mapped to the SDXC/SDHCI controller. If "sdhci"
- *    remains un-muxed, GPIO 18 cannot be acquired by the gpio-keys driver.
- *    Explicitly muxing "sdhci" to "gpio" enables GPIO 18 input interrupts.
+ * Critical MT7621 Pinctrl Fix:
+ * - "rgmii2" (GPIO 22-33): Muxed to "gpio" to eliminate GMAC1 interference with switch GMAC0.
+ * - "sdhci" (GPIO 18-21): Muxed to "gpio" so GPIO 18 (reset) and GPIO 19 receive interrupts.
+ * - "i2c", "uart2", "uart3", "wdt": Released for LEDs and buttons.
  */
 &state_default {
 	gpio {
@@ -127,52 +147,59 @@
 
 			factory: partition@40000 {
 				label = "factory";
-				reg = <0x00040000 0x00010000>; /* 64KB calibration data */
+				reg = <0x00040000 0x00010000>; /* 64KB */
 				read-only;
 
-				/* Linux 6.6 modern nvmem-layout syntax */
 				nvmem-layout {
 					compatible = "fixed-layout";
 					#address-cells = <1>;
 					#size-cells = <1>;
 
-					macaddr_factory_4: macaddr@4 {
-						reg = <0x4 0x6>;
+					/* OEM MAC address stored at offset 0xc00 */
+					macaddr_factory_c00: macaddr@c00 {
+						reg = <0xc00 0x6>;
 					};
 
-					macaddr_factory_2e: macaddr@2e {
-						reg = <0x2e 0x6>;
-					};
-
+					/* MT7915 / MT7916 EEPROM calibration cells */
 					eeprom_factory_0: eeprom@0 {
 						reg = <0x0 0x1000>;
+					};
+
+					eeprom_factory_8000: eeprom@8000 {
+						reg = <0x8000 0x1000>;
 					};
 				};
 			};
 
-			/*
-			 * 16MB Total Flash (0x1000000) - 256KB Bootloader/Factory (0x50000)
-			 * Total Available for Kernel + Squashfs Rootfs: 16064KB (0xfb0000)
-			 */
 			partition@50000 {
 				compatible = "openwrt,uimage", "denx,uimage";
 				label = "firmware";
-				reg = <0x00050000 0x00fb0000>;
+				reg = <0x00050000 0x00fb0000>; /* 16064KB */
 			};
 		};
 	};
 };
 
 &gmac0 {
-	nvmem-cells = <&macaddr_factory_4>;
+	nvmem-cells = <&macaddr_factory_c00>;
 	nvmem-cell-names = "mac-address";
 };
 
+/*
+ * Exact 3-Port DSA Switch Map confirmed from OEM / ROOter live system:
+ * - Port 0: wan (eth0 port 0, MAC + 1)
+ * - Port 1: lan2 (eth0 port 1)
+ * - Port 2: lan1 (eth0 port 2)
+ * - Port 3, 4: Disabled
+ */
 &switch0 {
 	ports {
 		port@0 {
 			status = "okay";
-			label = "lan1";
+			label = "wan";
+			nvmem-cells = <&macaddr_factory_c00>;
+			nvmem-cell-names = "mac-address";
+			mac-address-increment = <1>;
 		};
 
 		port@1 {
@@ -182,30 +209,25 @@
 
 		port@2 {
 			status = "okay";
-			label = "lan3";
+			label = "lan1";
 		};
 
 		port@3 {
-			status = "okay";
-			label = "lan4";
+			status = "disabled";
 		};
 
 		port@4 {
-			status = "okay";
-			label = "wan";
-			nvmem-cells = <&macaddr_factory_4>;
-			nvmem-cell-names = "mac-address";
-			mac-address-increment = <1>;
+			status = "disabled";
 		};
 	};
 };
 
-/* Enable MT7621 USB 3.0 / 2.0 Host Controller for MBIM Modem */
+/* USB 3.0 / 2.0 Host Controller for 5G Modem */
 &xhci {
 	status = "okay";
 };
 
-/* Enable PCIe Controller for MT7915 Wi-Fi 6 card */
+/* PCIe Controller for MT7915 / MT7916 Wi-Fi */
 &pcie {
 	status = "okay";
 };
@@ -216,7 +238,7 @@
 	wifi@0,0 {
 		compatible = "mediatek,mt76";
 		reg = <0x0000 0 0 0 0>;
-		nvmem-cells = <&eeprom_factory_0>, <&macaddr_factory_2e>;
+		nvmem-cells = <&eeprom_factory_0>, <&macaddr_factory_c00>;
 		nvmem-cell-names = "eeprom", "mac-address";
 	};
 };
