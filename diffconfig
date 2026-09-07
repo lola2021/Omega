@@ -39,9 +39,10 @@ CONFIG_PACKAGE_kmod-usb-core=y
 CONFIG_PACKAGE_kmod-usb2=y
 CONFIG_PACKAGE_kmod-usb3=y
 
-# Wireless Subsystem (MT7915 Wi-Fi 6 DBDC)
+# Wireless Subsystem (MT7915 + MT7916 Wi-Fi 6)
 CONFIG_PACKAGE_kmod-mt7915e=y
-CONFIG_PACKAGE_mt7915-firmware=y
+CONFIG_PACKAGE_kmod-mt7915-firmware=y
+CONFIG_PACKAGE_kmod-mt7916-firmware=y
 CONFIG_PACKAGE_wpad-basic-mbedtls=y
 
 # Utilities & Modem Tinkering (ROOter parity)

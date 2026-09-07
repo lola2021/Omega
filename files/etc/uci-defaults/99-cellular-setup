@@ -2,7 +2,8 @@
 # /etc/uci-defaults/99-cellular-setup
 # Automated first-boot setup for Mesh MK01K21 cellular modem & MBIM
 
-# Ensure modem power script is enabled
+# The DTS gpio-export node owns GPIO 6 and boots the active-low modem power
+# line asserted. Enable the service only for deliberate later power cycles.
 [ -x /etc/init.d/modem-power ] && /etc/init.d/modem-power enable
 
 # Setup MBIM network interface if not present

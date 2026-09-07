@@ -28,23 +28,16 @@
 		reg = <0x00000000 0x10000000>; /* 256MB DDR3 */
 	};
 
-	/* Modem Power Supply (GPIO 6 Active HIGH) */
-	reg_modem: regulator-modem {
-		compatible = "regulator-fixed";
-		regulator-name = "modem_power";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-		gpio = <&gpio 6 GPIO_ACTIVE_HIGH>;
-		enable-active-high;
-		regulator-always-on;
-		regulator-boot-on;
-	};
-
-	/* OEM gpio-export compatibility node */
+	/*
+	 * Modem power enable: GPIO 6 is active low on this board.
+	 * gpio-export is the sole owner. Keep its GPIO flag active high:
+	 * output = <0> must drive the physical line low at boot.
+	 */
 	gpio-export {
 		compatible = "gpio-export";
 
-		gpio_pcie0_power {
+		modem-power {
+			gpio-export,name = "modem-power";
 			gpio-export,output = <0>;
 			gpios = <&gpio 6 GPIO_ACTIVE_HIGH>;
 		};

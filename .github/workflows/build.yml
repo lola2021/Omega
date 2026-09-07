@@ -6,7 +6,7 @@ on:
       openwrt_branch:
         description: 'OpenWrt Git Branch or Tag'
         required: true
-        default: 'main'
+        default: 'openwrt-25.12'
         type: string
       upload_release:
         description: 'Publish GitHub Release on completion'
@@ -26,7 +26,7 @@ on:
 
 jobs:
   build:
-    name: Build Firmware (Kernel 6.12 / MT7621)
+    name: Build Firmware (OpenWrt 25.12 / MT7621)
     runs-on: ubuntu-24.04
 
     steps:
@@ -53,7 +53,7 @@ jobs:
 
       - name: Clone OpenWrt Source
         run: |
-          TARGET_BRANCH="${{ github.event.inputs.openwrt_branch || 'main' }}"
+          TARGET_BRANCH="${{ github.event.inputs.openwrt_branch || 'openwrt-25.12' }}"
           echo "Cloning branch: $TARGET_BRANCH"
           git clone --depth 1 -b "$TARGET_BRANCH" https://github.com/openwrt/openwrt.git openwrt
 
@@ -73,7 +73,7 @@ jobs:
             git -C openwrt apply ../target_patches/0001-ramips-mt7621-add-mesh-mk01k21.patch
           else
             echo "Patch offset detected, appending Device/mesh_mk01k21 to mt7621.mk directly..."
-            printf "\ndefine Device/mesh_mk01k21\n  \$(Device/dsa-migration)\n  \$(Device/uimage-lzma-loader)\n  IMAGE_SIZE := 16064k\n  DEVICE_VENDOR := Mesh\n  DEVICE_MODEL := MK01K21\n  DEVICE_COMPAT := mesh,mk01k21\n  DEVICE_PACKAGES := kmod-mt7915e mt7915-firmware kmod-usb3 kmod-usb-net-cdc-mbim kmod-usb-net-qmi-wwan umbim uqmi usb-modeswitch kmod-usb-serial-option kmod-usb-serial-wwan kmod-nft-mangle\nendef\nTARGET_DEVICES += mesh_mk01k21\n" >> openwrt/target/linux/ramips/image/mt7621.mk
+            printf "\ndefine Device/mesh_mk01k21\n  \$(Device/dsa-migration)\n  \$(Device/uimage-lzma-loader)\n  IMAGE_SIZE := 16064k\n  DEVICE_VENDOR := Mesh\n  DEVICE_MODEL := MK01K21\n  DEVICE_COMPAT := mesh,mk01k21\n  DEVICE_PACKAGES := kmod-mt7915e kmod-mt7915-firmware kmod-mt7916-firmware kmod-usb3 kmod-usb-net-cdc-mbim kmod-usb-net-qmi-wwan umbim uqmi usb-modeswitch kmod-usb-serial-option kmod-usb-serial-wwan kmod-nft-mangle\nendef\nTARGET_DEVICES += mesh_mk01k21\n" >> openwrt/target/linux/ramips/image/mt7621.mk
           fi
 
           echo "=== Injecting Runtime Files Overlay ==="
