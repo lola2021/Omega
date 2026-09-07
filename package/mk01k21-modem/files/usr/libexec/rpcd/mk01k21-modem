@@ -1,0 +1,252 @@
+#!/bin/sh
+
+# rpcd exec backend for the Mesh MK01K21 Quectel RM520N modem.
+# Every AT operation is serialized and receives the command as one argv item.
+
+[ "${MK01K21_MODEM_TEST:-0}" = "1" ] || . /usr/share/libubox/jshn.sh
+
+LOCK_DIR=/tmp/mk01k21-modem.lock
+MAX_AT_LENGTH=256
+
+config_get() {
+	uci -q get "mk01k21-modem.main.$1" 2>/dev/null || printf '%s' "$2"
+}
+
+valid_port() {
+	printf '%s' "$1" | grep -Eq '^/dev/tty(USB|ACM)[0-9]+$'
+}
+
+valid_at_command() {
+	local command="$1"
+	[ -n "$command" ] || return 1
+	[ "${#command}" -le "$MAX_AT_LENGTH" ] || return 1
+	case "$command" in
+		AT|AT*) ;;
+		*) return 1 ;;
+	esac
+	[ "$(printf '%s' "$command" | wc -l)" -eq 0 ] || return 1
+	printf '%s' "$command" | LC_ALL=C grep -q '[[:cntrl:]]' && return 1
+	return 0
+}
+
+acquire_lock() {
+	local owner
+	if mkdir "$LOCK_DIR" 2>/dev/null; then
+		printf '%s\n' "$$" > "$LOCK_DIR/pid"
+		return 0
+	fi
+
+	owner="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+	if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+		return 1
+	fi
+
+	rm -rf "$LOCK_DIR"
+	mkdir "$LOCK_DIR" 2>/dev/null || return 1
+	printf '%s\n' "$$" > "$LOCK_DIR/pid"
+}
+
+release_lock() {
+	rm -rf "$LOCK_DIR"
+}
+
+run_at() {
+	local port="$1"
+	local command="$2"
+	local timeout_seconds
+	timeout_seconds="$(config_get at_timeout 8)"
+	timeout "$timeout_seconds" sms_tool -d "$port" at "$command" 2>&1
+}
+
+json_error() {
+	json_init
+	json_add_boolean ok 0
+	json_add_string error "$1"
+	json_dump
+}
+
+require_port() {
+	local port="$1"
+	valid_port "$port" && [ -c "$port" ]
+}
+
+add_at_result() {
+	local name="$1"
+	local command="$2"
+	local port="$3"
+	local output
+	output="$(run_at "$port" "$command")"
+	json_add_string "$name" "$output"
+}
+
+handle_status() {
+	local input full port interface wdm network_json
+	input="$(cat)"
+	json_load "${input:-{}}" || {
+		json_error "Invalid request"
+		return
+	}
+	json_get_var full full
+	port="$(config_get at_port /dev/ttyUSB2)"
+	interface="$(config_get interface wan_cellular)"
+	wdm="$(config_get wdm_device /dev/cdc-wdm0)"
+
+	require_port "$port" || {
+		json_error "Configured AT port is unavailable: $port"
+		return
+	}
+	acquire_lock || {
+		json_error "The modem is busy; try again shortly"
+		return
+	}
+	trap release_lock EXIT INT TERM
+
+	network_json="$(ubus call "network.interface.$interface" status 2>/dev/null || printf '{}')"
+	json_init
+	json_add_boolean ok 1
+	json_add_string at_port "$port"
+	json_add_string wdm_device "$wdm"
+	json_add_string interface "$interface"
+	json_add_string network_json "$network_json"
+	json_add_int timestamp "$(date +%s)"
+	if [ "$full" = "1" ]; then
+		add_at_result identity 'ATI' "$port"
+		add_at_result model 'AT+CGMM' "$port"
+		add_at_result firmware 'AT+GMR' "$port"
+		add_at_result imei 'AT+CGSN' "$port"
+		add_at_result imsi 'AT+CIMI' "$port"
+		add_at_result iccid 'AT+QCCID' "$port"
+		add_at_result sim 'AT+CPIN?' "$port"
+	fi
+	add_at_result operator 'AT+COPS?' "$port"
+	add_at_result csq 'AT+CSQ' "$port"
+	add_at_result qcsq 'AT+QCSQ' "$port"
+	add_at_result network_info 'AT+QNWINFO' "$port"
+	add_at_result serving_cell 'AT+QENG="servingcell"' "$port"
+	add_at_result carrier_aggregation 'AT+QCAINFO' "$port"
+	add_at_result temperature 'AT+QTEMP' "$port"
+	json_dump
+}
+
+handle_at() {
+	local input command port output rc
+	input="$(cat)"
+	json_load "${input:-{}}" || {
+		json_error "Invalid request"
+		return
+	}
+	json_get_var command command
+	valid_at_command "$command" || {
+		json_error "Commands must start with AT, contain no control characters, and be at most $MAX_AT_LENGTH characters"
+		return
+	}
+
+	port="$(config_get at_port /dev/ttyUSB2)"
+	require_port "$port" || {
+		json_error "Configured AT port is unavailable: $port"
+		return
+	}
+	acquire_lock || {
+		json_error "The modem is busy; try again shortly"
+		return
+	}
+	trap release_lock EXIT INT TERM
+
+	output="$(run_at "$port" "$command")"
+	rc=$?
+	json_init
+	[ "$rc" -eq 0 ] && json_add_boolean ok 1 || json_add_boolean ok 0
+	json_add_int code "$rc"
+	json_add_string command "$command"
+	json_add_string output "$output"
+	[ "$rc" -eq 0 ] || json_add_string error "The modem command failed or timed out"
+	json_dump
+}
+
+handle_power() {
+	local input action port output rc
+	input="$(cat)"
+	json_load "${input:-{}}" || {
+		json_error "Invalid request"
+		return
+	}
+	json_get_var action action
+
+	case "$action" in
+		restart)
+			port="$(config_get at_port /dev/ttyUSB2)"
+			require_port "$port" || {
+				json_error "Configured AT port is unavailable: $port"
+				return
+			}
+			acquire_lock || {
+				json_error "The modem is busy; try again shortly"
+				return
+			}
+			trap release_lock EXIT INT TERM
+			output="$(run_at "$port" 'AT+CFUN=1,1')"
+			rc=$?
+			;;
+		cycle)
+			acquire_lock || {
+				json_error "The modem is busy; try again shortly"
+				return
+			}
+			trap release_lock EXIT INT TERM
+			output="$(/etc/init.d/modem-power restart 2>&1)"
+			rc=$?
+			;;
+		*)
+			json_error "Unsupported recovery action"
+			return
+			;;
+	esac
+
+	json_init
+	[ "$rc" -eq 0 ] && json_add_boolean ok 1 || json_add_boolean ok 0
+	json_add_int code "$rc"
+	json_add_string action "$action"
+	json_add_string output "$output"
+	[ "$rc" -eq 0 ] || json_add_string error "The recovery action failed"
+	json_dump
+}
+
+handle_ports() {
+	local path
+	json_init
+	json_add_boolean ok 1
+	json_add_array at_ports
+	for path in /dev/ttyUSB* /dev/ttyACM*; do
+		[ -c "$path" ] && json_add_string "" "$path"
+	done
+	json_close_array
+	json_add_array wdm_devices
+	for path in /dev/cdc-wdm*; do
+		[ -c "$path" ] && json_add_string "" "$path"
+	done
+	json_close_array
+	json_dump
+}
+
+main() {
+	case "$1" in
+		list)
+			printf '%s\n' '{"status":{"full":"Boolean"},"at":{"command":"String"},"power":{"action":"String"},"ports":{}}'
+			;;
+		call)
+			case "$2" in
+				status) handle_status ;;
+				at) handle_at ;;
+				power) handle_power ;;
+				ports) handle_ports ;;
+				*) json_error "Unknown method" ;;
+			esac
+			;;
+		*) exit 1 ;;
+	esac
+}
+
+if [ "${MK01K21_MODEM_TEST:-0}" = "1" ]; then
+	return 0 2>/dev/null || exit 0
+fi
+main "$@"

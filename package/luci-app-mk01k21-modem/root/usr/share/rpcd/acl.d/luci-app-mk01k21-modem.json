@@ -1,0 +1,17 @@
+{
+	"luci-app-mk01k21-modem": {
+		"description": "Grant access to the MK01K21 modem application",
+		"read": {
+			"ubus": {
+				"mk01k21-modem": [ "status", "ports" ]
+			},
+			"uci": [ "mk01k21-modem", "network" ]
+		},
+		"write": {
+			"ubus": {
+				"mk01k21-modem": [ "at", "power" ]
+			},
+			"uci": [ "mk01k21-modem" ]
+		}
+	}
+}

@@ -20,6 +20,7 @@ on:
     paths:
       - 'dts/**'
       - 'files/**'
+      - 'package/**'
       - 'target_patches/**'
       - 'diffconfig'
       - '.github/workflows/**'
@@ -32,6 +33,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate Custom Modem Packages
+        run: |
+          git diff --check
+          sh -n package/mk01k21-modem/files/usr/libexec/rpcd/mk01k21-modem
+          sh -n tests/test-modem-backend.sh
+          sh tests/test-modem-backend.sh
+          node tests/test-modem-parser.js
+          python3 -m json.tool package/luci-app-mk01k21-modem/root/usr/share/luci/menu.d/luci-app-mk01k21-modem.json >/dev/null
+          python3 -m json.tool package/luci-app-mk01k21-modem/root/usr/share/rpcd/acl.d/luci-app-mk01k21-modem.json >/dev/null
 
       - name: Free Disk Space
         run: |
@@ -82,6 +93,10 @@ jobs:
           chmod +x openwrt/files/etc/init.d/* || true
           chmod +x openwrt/files/etc/uci-defaults/* || true
 
+          echo "=== Injecting Custom Packages ==="
+          cp -r package/mk01k21-modem openwrt/package/
+          cp -r package/luci-app-mk01k21-modem openwrt/package/
+
           echo "=== Applying diffconfig ==="
           cp diffconfig openwrt/.config
 
@@ -92,7 +107,7 @@ jobs:
           echo "=== Selected Target Device ==="
           grep -i "CONFIG_TARGET_ramips_mt7621_DEVICE_mesh_mk01k21" .config || true
           echo "=== Selected Cellular Packages ==="
-          grep -E "CONFIG_PACKAGE_(luci-proto-mbim|umbim|kmod-usb-net-cdc-mbim)" .config || true
+          grep -E "CONFIG_PACKAGE_(luci-proto-mbim|umbim|kmod-usb-net-cdc-mbim|mk01k21-modem|luci-app-mk01k21-modem)" .config || true
 
       - name: Download Dependency Tarballs
         working-directory: openwrt

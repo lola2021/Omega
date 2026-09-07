@@ -50,3 +50,7 @@ CONFIG_PACKAGE_picocom=y
 CONFIG_PACKAGE_sms-tool=y
 CONFIG_PACKAGE_luci-app-watchcat=y
 CONFIG_PACKAGE_gpiod-tools=y
+
+# MK01K21 RM520N Modem Management
+CONFIG_PACKAGE_mk01k21-modem=y
+CONFIG_PACKAGE_luci-app-mk01k21-modem=y
