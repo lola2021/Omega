@@ -25,6 +25,9 @@ define Package/mk01k21-modem/conffiles
 /etc/config/mk01k21-modem
 endef
 
+define Build/Compile
+endef
+
 define Package/mk01k21-modem/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/etc/config/mk01k21-modem $(1)/etc/config/mk01k21-modem
