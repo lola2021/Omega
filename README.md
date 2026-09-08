@@ -1,54 +1,69 @@
-# OpenWrt 25.12 Port for Mesh MK01K21 (MT7621 + MT7915)
+# OpenWrt 25.12 port for the Mesh MK01K21 (MT7621 + MT7915 + RM520N-GL)
 
-This repository contains the complete port configuration to bring the **Mesh MK01K21** router from OpenWrt 22.03 (Linux Kernel 5.10) to **OpenWrt 25.12 (Linux Kernel 6.6)**.
+Brings the **Mesh MK01K21** 5G CPE from ROOTer (OpenWrt 22.03, Linux 5.10) to
+**OpenWrt 25.12** (Linux 6.12), and adds a small LuCI application for the
+Quectel RM520N-GL modem so the device does not lose its cellular tooling in the
+move.
+
+**Status: built and validated, not yet flashed.** The most recent image passed
+the running router's own `sysupgrade` validation (checksum match, board name and
+compat version accepted, no force required). Everything in the
+"[Unverified until first boot](#unverified-until-first-boot)" section below is
+exactly that — unverified.
 
 ---
 
-## Hardware Specifications
+## 1. Hardware
 
 | Component | Specification |
 | :--- | :--- |
-| **SoC** | MediaTek MT7621A (Dual-Core MIPS 1004Kc @ 880MHz) |
-| **RAM** | 256MB DDR3 |
-| **Flash** | 16MB SPI NOR Flash (`jedec,spi-nor`) |
-| **Wireless** | MediaTek MT7915 (PCIe Wi-Fi 6 802.11ax 2x2 2.4GHz + 2x2 5GHz) |
-| **Ethernet** | Internal MT7530 Gigabit DSA Switch (4x LAN, 1x WAN) |
-| **Cellular Modem** | USB 3.0/2.0 host controller interface with MBIM protocol |
-| **Reset Button** | **GPIO 18** (Active LOW, mapped to `KEY_RESTART`) |
-| **Modem Power** | **GPIO 6** (Active HIGH, enabled via `regulator-modem` & init script) |
-| **Target Architecture** | `ramips / mt7621` |
+| SoC | MediaTek MT7621A — dual-core MIPS 1004Kc @ 880 MHz |
+| RAM | 256 MB DDR3 |
+| Flash | 16 MB SPI NOR (`jedec,spi-nor`) |
+| Wireless | MediaTek MT7915 DBDC — 2×2 2.4 GHz + 2×2 5 GHz 802.11ax, on PCIe0 |
+| Ethernet | MT7530 gigabit DSA switch — **2 × LAN + 1 × WAN** |
+| Modem | Quectel RM520N-GL 5G on USB, **MBIM** (`/dev/cdc-wdm0`), AT on `/dev/ttyUSB2` |
+| Buttons | reset GPIO 18, WPS GPIO 10, rfkill GPIO 12 (all active low) |
+| Target | `ramips / mt7621`, board compatible `mesh,mk01k21` |
+
+The switch has two LAN ports, not four. Earlier revisions of this document said
+four; the DTS enables `wan`, `lan2` and `lan1` only.
 
 ---
 
-## 1. Key Device Tree (DTS) Adaptations (Kernel 5.10 vs Kernel 6.6)
+## 2. Key device-tree decisions
 
-### A. The Critical `rgmii2` & `sdhci` Pinctrl Fix
-On the MT7621 SoC, pin groups are multiplexed between dedicated controllers and general-purpose I/Os:
+### A. The `rgmii2` and `sdhci` pinmux release
 
 ```dts
 &state_default {
 	gpio {
-		groups = "i2c", "uart2", "uart3", "rgmii2", "sdhci", "wdt";
+		groups = "i2c", "uart2", "uart3", "rgmii2", "sdhci", "wdt", "jtag";
 		function = "gpio";
 	};
 };
 ```
 
-1. **`rgmii2` Fix**:
-   - Pins 22 to 33 are shared between **GMAC1 (RGMII2)** and GPIOs.
-   - In standard single-CPU-port MT7621 topologies, the internal MT7530 switch connects solely through GMAC0 (RGMII1 / TRGMII). GMAC1 is unused.
-   - When `rgmii2` is left unassigned or claimed by GMAC1, the pins oscillate with clock noise, cause electrical contention on the MDIO/bus lines, and cause packet loss on the internal switch link. Muxing `rgmii2` to `"gpio"` releases these pins cleanly.
-2. **`sdhci` Fix**:
-   - Pins 18 to 21 are shared with the SDXC/SDHCI controller.
-   - The **Reset Button** is wired to **GPIO 18**. If the `sdhci` group is not explicitly set to `"gpio"`, GPIO 18 cannot be allocated as an interrupt input by `gpio-keys`, rendering the reset button completely non-functional.
+* **`rgmii2`** — pins 22–33 are shared between GMAC1 (RGMII2) and GPIO. This
+  board routes the MT7530 switch through GMAC0 only, so GMAC1 is unused. Left
+  unassigned, those pins carry clock noise onto the MDIO lines and cost packets
+  on the internal switch link. Muxing them to `"gpio"` releases them cleanly.
+* **`sdhci`** — pins 18–21 are shared with the SD controller, and the **reset
+  button is GPIO 18**. Without this group muxed to `"gpio"`, `gpio-keys` cannot
+  claim pin 18 as an interrupt and the reset button does nothing.
 
-### B. Linux 6.6 Modern `nvmem-layout`
-In OpenWrt 22.03 (kernel 5.10), calibration data and MAC addresses were parsed via legacy `compatible = "nvmem-cells"` or `mediatek,mtd-eeprom`. Linux kernel 6.6 requires the `nvmem-layout` sub-block with `compatible = "fixed-layout"`:
+This is a superset of the OEM muxing: the OEM device tree relies on reset
+defaults for `uart2`, which is declared explicitly here.
+
+### B. Linux 6.12 `nvmem-layout`, and where the MACs and calibration come from
+
+Kernel 6.x replaced the legacy `nvmem-cells` / `mediatek,mtd-eeprom` parsing
+with a `nvmem-layout` sub-node. The factory partition declares one cell:
 
 ```dts
 factory: partition@40000 {
 	label = "factory";
-	reg = <0x00040000 0x00010000>;
+	reg = <0x00040000 0x00010000>;	/* 64KB */
 	read-only;
 
 	nvmem-layout {
@@ -56,110 +71,315 @@ factory: partition@40000 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		macaddr_factory_4: macaddr@4 {
-			reg = <0x4 0x6>;
-		};
-
-		macaddr_factory_2e: macaddr@2e {
-			reg = <0x2e 0x6>;
-		};
-
-		eeprom_factory_0: eeprom@0 {
-			reg = <0x0 0x1000>;
+		/* OEM MAC address stored at offset 0xc00 */
+		macaddr_factory_c00: macaddr@c00 {
+			reg = <0xc00 0x6>;
 		};
 	};
 };
 ```
 
-### C. Modem Power Management (GPIO 6)
-The cellular modem rail is handled natively through a fixed regulator:
+Three nodes consume it: the `wan` switch port (with
+`mac-address-increment = <1>`) and both PCIe Wi-Fi nodes. **Keep those
+`nvmem-cells` / `mac-address` properties** — they are correct and have been
+removed by mistake before.
+
+**The MAC at `0xc00` is blank on this unit**, which is why the Ethernet MAC is
+random on every boot until a UCI override is set. That is a post-first-boot fix,
+not a device-tree one.
+
+Wi-Fi **calibration** does not come from this partition either. The MT7915
+reports `eeprom load fail, use default bin`, so the image ships two rescued
+generic EEPROM blobs in `files/lib/firmware/mediatek/`. The practical
+consequence: radiated power is approximate relative to the reported figure.
+That is equally true on ROOTer today, and a newer driver does not change it —
+only restoring genuine per-unit calibration would.
+
+### C. GPIO 6 is **PCIe0 power**, not modem power
+
+This is the most important correction to earlier versions of this document,
+which described GPIO 6 as a modem rail driven by a `regulator-fixed` node.
+Evidence gathered from the running device:
+
+* The OEM device tree names the pin `gpio_pcie0_power`.
+* **PCIe0 hosts the MT7915 host interface**, so cutting this rail at runtime
+  would likely drop *both* Wi-Fi bands and would not touch the modem.
+* ROOTer never toggles it. Its scripts look for `/sys/class/gpio/gpio6`, which
+  does not exist under this kernel's GPIO numbering (base 480), and for named
+  exports (`cellular-control`, `pci_power`, `lte_power`, `modem1`, `4g1-pwr`, …)
+  none of which this board provides.
+* No `GPIOPIN=` exists anywhere in ROOTer's `/etc`, and `uci show` has no GPIO
+  or power entries — meaning **ROOTer has no modem-power GPIO configured on
+  this board at all**. Its modem recovery is AT-based (`AT+CFUN=1,1`).
+
+The DTS therefore exports the pin once, read-only in practice, reproducing
+ROOTer's boot state (output, value 0):
 
 ```dts
-reg_modem: regulator-modem {
-	compatible = "regulator-fixed";
-	regulator-name = "modem_power";
-	regulator-min-microvolt = <3300000>;
-	regulator-max-microvolt = <3300000>;
-	gpio = <&gpio 6 GPIO_ACTIVE_HIGH>;
-	enable-active-high;
-	regulator-always-on;
-	regulator-boot-on;
+gpio-export {
+	compatible = "gpio-export";
+	modem-power {
+		gpio-export,name = "modem-power";
+		gpio-export,output = <0>;
+		gpios = <&gpio 6 GPIO_ACTIVE_HIGH>;
+	};
 };
 ```
-In addition, `/etc/init.d/modem-power` provides manual power cycling and cold recovery commands.
+
+The export keeps the historical name `modem-power`, which is misleading — treat
+the name as a legacy label, not a description. **Do not toggle this pin.** The
+LuCI "power cycle" button that used to drive it was removed for this reason;
+only the AT-based "Restart modem" action remains. `/etc/init.d/modem-power`
+survives as a shell-only tool for a future supervised experiment.
+
+### D. Flash layout
+
+| Partition | Offset | Size |
+| :--- | :--- | :--- |
+| `u-boot` | `0x00000000` | 192 KB |
+| `u-boot-env` | `0x00030000` | 64 KB |
+| `factory` | `0x00040000` | 64 KB (calibration + MACs) |
+| `firmware` | `0x00050000` | 16,064 KB |
+
+Kernel + squashfs must stay under **16,449,536 bytes**. CI asserts this.
 
 ---
 
-## 2. 16MB Flash Optimization Strategy
+## 3. Status LEDs
 
-On a 16MB SPI NOR flash router running Linux 6.6, LuCI, MT7915 Wi-Fi 6 firmware, and MBIM cellular tools, flash space is tight. The following optimizations are configured in `diffconfig`:
+Seven LEDs, all confirmed against the OEM device tree including polarity. There
+is **one** Wi-Fi LED and **two bi-colour cellular lamps** — not one LED per
+Wi-Fi band.
 
-1. **Kernel Footprint**:
-   - `CONFIG_STRIP_KERNEL_EXPORTS=y`: Drops unneeded kernel symbol exports (~200KB saved).
-   - `# CONFIG_KERNEL_KALLSYMS is not set`: Drops symbol lookup table (~350KB compressed saved).
-   - `# CONFIG_KERNEL_DEBUG_FS is not set`: Removes debugfs overhead.
-2. **Squashfs Block Size**:
-   - `CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=256` (or `1024`): Provides superior XZ compression ratio for the rootfs.
-3. **Partition Budget**:
-   - `u-boot`: 192KB (`0x00000000 - 0x00030000`)
-   - `u-boot-env`: 64KB (`0x00030000 - 0x00040000`)
-   - `factory`: 64KB (`0x00040000 - 0x00050000`)
-   - `firmware`: 16,064KB (`0x00050000 - 0x01000000`)
-   The combined kernel + squashfs image must remain strictly below **15.68 MB (16,449,536 bytes)**.
+| LED | GPIO | Meaning | Driven by |
+| :--- | :--- | :--- | :--- |
+| `top:5gblue` | 14 (active low) | blinks while booting, solid when up | DTS `led-boot` / `led-running` alias, handled by `diag.sh` |
+| `top:5gred` | 15 | failsafe / sysupgrade | DTS `led-failsafe` / `led-upgrade` alias |
+| `blue:wifi` | 0 | Wi-Fi link and traffic | `netdev` trigger on `wlan0`, configured by `files/etc/uci-defaults/98-leds` |
+| `led:4gblue` | 11 | solid = **connected** | `mk01k21-modem-led` |
+| `led:4gorange` | 17 | 500 ms blink = searching · 200 ms = connecting | `mk01k21-modem-led` |
+| `led:5gblue` | 9 | solid = **on 5G NR** | `mk01k21-modem-led`, via the `rat` ubus method |
+| `led:5gorange` | 13 | solid = attached but not 5G | same |
+
+`mesh,mk01k21` is absent from upstream `board.d/01_leds`, so no LED config is
+generated at first boot — hence the explicit `uci-defaults` file. The `netdev`
+trigger itself needs no package: `CONFIG_LEDS_TRIGGER_NETDEV=y` is built into
+the generic 6.12 kernel.
+
+The cellular state machine lives at
+`package/mk01k21-modem/files/usr/libexec/mk01k21-modem-led` and is driven by
+`/etc/hotplug.d/iface/30-mk01k21-modem-led`. The hook sets the connected state
+immediately and resolves the radio technology in a background subshell, because
+netifd runs hotplug scripts serially and an 8-second AT timeout inline would
+stall interface bring-up.
+
+This reproduces ROOTer's behaviour but **not** two defects in ROOTer's
+`modem-led.sh`: its "connecting" state wrote to `.../led:4gorangetrigger`
+(a missing slash, so the fast blink only worked if the slow blink had already
+run), and its entire signal-strength blink logic sits after an unconditional
+`exit 0` and has never executed. Signal-proportional blinking does not exist in
+ROOTer and is not implemented here either.
 
 ---
 
-## 3. Cellular & MBIM Protocol Configuration
+## 4. Cellular configuration
 
-### Installed Packages
-- `luci-proto-mbim`: Web GUI interface selector for MBIM.
-- `umbim`: Lightweight userspace daemon communicating with `/dev/cdc-wdm0`.
-- `kmod-usb-net-cdc-mbim`: Kernel network driver for MBIM.
-- `kmod-usb-serial-option` & `kmod-usb-serial-wwan`: Serial AT command ports for diagnostics and SMS.
-- `usb-modeswitch`: Handles USB device switching from mass storage to modem.
+The modem is already in MBIM composition, so no mode switch is needed.
 
-### UCI Network Configuration (`/etc/config/network`)
 ```uci
 config interface 'wan_cellular'
 	option proto 'mbim'
 	option device '/dev/cdc-wdm0'
 	option apn 'internet'
-	option pdptype 'ip'
+	option pdptype 'ipv4'
 	option metric '10'
 	option auto '1'
 	option peerdns '1'
 	option defaultroute '1'
 ```
 
-### Useful CLI Commands for Cellular Debugging
-- Check modem status:
-  ```sh
-  umbim -d /dev/cdc-wdm0 caps
-  umbim -d /dev/cdc-wdm0 subscriber
-  umbim -d /dev/cdc-wdm0 registration-state
-  ```
-- Send AT command:
-  ```sh
-  chat -t 3 -v "" "AT+CSQ" "OK" >/dev/ttyUSB2 </dev/ttyUSB2
-  ```
-- Power cycle modem:
-  ```sh
-  /etc/init.d/modem-power restart
-  ```
+**`pdptype` must be `ipv4`, not `ip`.** OpenWrt 25.12's `mbim.sh` silently
+discards `ip`.
+
+Relevant packages from `diffconfig`: `umbim`, `luci-proto-mbim`,
+`kmod-usb-net-cdc-mbim`, `kmod-usb-wdm`, `kmod-usb-serial-option`,
+`kmod-usb-serial-wwan`, `usb-modeswitch`, `sms-tool`, `picocom`, `chat`,
+`comgt`, plus `luci-app-watchcat` and `kmod-nft-mangle`.
 
 ---
 
-## 4. GitHub Actions Workflow
+## 5. The `mk01k21-modem` LuCI application
 
-The automated build workflow is located at `.github/workflows/build.yml`.
+Two packages: `mk01k21-modem` (a data-only rpcd backend) and
+`luci-app-mk01k21-modem` (the UI). They appear in LuCI under a top-level
+**Modem** menu.
 
-### How to Trigger:
-1. Push this repository to GitHub.
-2. Go to **Actions** -> **Build OpenWrt 25.12 for Mesh MK01K21**.
-3. Click **Run workflow**:
-   - Choose branch: `main` (or `openwrt-25.12`).
-   - Check `Publish GitHub Release` if you want automatic release creation with download links.
-4. Download the generated `openwrt-mesh-mk01k21-firmware` artifact containing:
-   - `openwrt-ramips-mt7621-mesh_mk01k21-squashfs-sysupgrade.bin`
-   - `SHA256SUMS.txt`
-   - `config.buildinfo`
+| Page | What it does |
+| :--- | :--- |
+| **Network Status** | Signal metrics (RSRP/RSRQ/SINR/RSSI), serving cell, carrier aggregation, temperature, operator, modem and SIM identity with masking, and an AT-based "Restart modem" action |
+| **Connection Profile** | APN, PDP type, authentication, SIM PIN, MTU, metric, DNS |
+| **AT Console** | Send one validated AT command and read the response, with a preset list |
+| **Settings** | AT port selection, identity masking |
+
+### Serialisation
+
+Every path to the modem goes through one lock in the rpcd backend, because the
+status sweep, the AT console and the LED helper all want `/dev/ttyUSB2`. Two
+readers at once interleave AT responses and produce wrong values with no error,
+which is worse than an error. The lock uses `mkdir` as the atomic gate,
+publishes its pid by atomic rename, treats a pid-less lock directory as **held**
+rather than stale, renames on stale reclaim so a race has exactly one winner,
+verifies ownership before releasing, and tests liveness through `/proc/<pid>`
+rather than `kill -0` (which returns `EPERM` for another user's process and
+would falsely reclaim a live lock). busybox `flock` was deliberately avoided:
+the applet is not confirmed present, and a missing applet would fail every
+modem call.
+
+The LED helper never opens the serial port itself. It calls a narrow `rat` ubus
+method that runs exactly one `AT+QNWINFO` under that same lock.
+
+### AT parsing
+
+All parsing lives in one file,
+`package/luci-app-mk01k21-modem/htdocs/luci-static/resources/mk01k21-modem/parser.js`,
+and is fixture-tested against **real output captured from this project's own
+RM520N-GL** on T-Mobile NR5G-SA band n41. Two layout facts caused real bugs and
+are worth knowing before touching that file:
+
+* `AT+QCSQ` returns **four** fields on NR5G-SA — `RSRP, SINR, RSRQ`, with no
+  RSSI. LTE prepends RSSI for five; EN-DC reports the LTE anchor then the NR
+  leg for eight.
+* `AT+QENG="servingcell"` places the **TAC at index 8, before the ARFCN** on
+  NR5G-SA — the reverse of the LTE order. Reading NR output with the LTE map
+  shifts every column from 8 onward and renders the bandwidth index as the
+  RSRP.
+
+Layouts are selected per radio technology. A technology whose field order has
+not been verified against real output (currently EN-DC) reports only the
+unambiguous identity fields and leaves the metrics blank. Every derived metric
+is additionally range-checked, so a future layout surprise degrades to a blank
+rather than a confident wrong number.
+
+Other quirks handled: `AT+CSQ` answers `99,99` (the 3GPP "not detectable"
+sentinel) on NR5G-SA; `AT+QTEMP` reports `0` for idle SDR PAs and `-273` for
+the absent mmWave sensor; bandwidth and subcarrier spacing are table indices,
+decoded to MHz and kHz; `AT+COPS` returns a numeric PLMN plus an access
+technology code.
+
+---
+
+## 6. Building
+
+**Do not build locally.** GitHub Actions is the only supported path; the
+workflow is `.github/workflows/build.yml`.
+
+Every build path targets `openwrt-25.12`. A push builds only on `main` /
+`master`, so work on a feature branch and dispatch explicitly:
+
+```sh
+gh workflow run build.yml --ref <branch> \
+  -f openwrt_branch=openwrt-25.12 -f upload_release=false
+```
+
+Or use **Actions → Build OpenWrt 25.12 for Mesh MK01K21 → Run workflow** in the
+web UI.
+
+The workflow fails — rather than warns — if a package config check does not
+pass, if the image is missing or exceeds 16,449,536 bytes, or if the manifest
+does not contain `mk01k21-modem`, `luci-app-mk01k21-modem`, `umbim`,
+`sms-tool`, `jshn` and `rpcd`. The artifact contains the sysupgrade image,
+`SHA256SUMS.txt` and `config.buildinfo`.
+
+Last successful build: **8,847,905 bytes**, 53.8 % of the firmware partition,
+187 packages, kernel 6.12.103, OpenWrt 25.12-SNAPSHOT. Note the *snapshot*:
+this is a stabilising release branch, not a tagged release.
+
+---
+
+## 7. Tests
+
+```sh
+sh tests/test-modem-backend.sh      # rpcd backend: locking, validation
+sh tests/test-modem-leds.sh         # LED state machine against a fake sysfs tree
+node tests/test-modem-parser.js     # AT parser fixtures
+```
+
+The shell suites are checked under both `sh` and `dash` (`dash` being closest
+to busybox `ash`). The parser fixtures run under Node *and* under macOS
+JavaScriptCore, for machines without Node:
+
+```sh
+/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc \
+  tests/test-modem-parser.js        # run from the repository root
+```
+
+---
+
+## 8. Not implemented
+
+Listed because a control that writes config and changes nothing is worse than
+an absent one. None of the following exists yet:
+
+* **A connection watchdog.** OpenWrt's MBIM handler recovers from clean
+  failures, but there is no ping keepalive, so the common cellular failure —
+  interface up, no data flowing — goes undetected. `luci-app-watchcat` ships in
+  the image as an interim measure: configure it under **Services → Watchcat**
+  against `wan_cellular`.
+* **SMS and USSD.** `sms-tool` is installed but has no UI.
+* **Band, RAT and cell locking.** The `AT+QNWPREFCFG` presets in the AT console
+  can do this by hand today. A UI needs guard rails first: a bad cell lock can
+  disconnect the modem until it is cleared.
+* **Status caching.** The status handler holds the lock across eight AT
+  commands, so two browser tabs contend and one is honestly told the modem is
+  busy.
+
+Also open: the rpcd ACL grants write access to the whole `network` config
+because rpcd cannot scope narrower — fixing it needs a redesign of the profile
+save method. The Ethernet MAC is random each boot because the factory MAC is
+blank, and needs a UCI override after first boot. The operator is displayed as
+its numeric PLMN because `AT+COPS` reports format 2.
+
+---
+
+## 9. Flashing and first boot
+
+Verify the image first, then flash with **"Keep settings" unchecked** — the
+modem stack differs from ROOTer's, so keeping its configuration is not useful:
+
+```sh
+sysupgrade -n /tmp/openwrt-ramips-mt7621-mesh_mk01k21-squashfs-sysupgrade.bin
+```
+
+`sysupgrade -T` is a safe dry run: `TEST=1` reaches `exit 0` before any
+flash-touching code, and before `install_bin /sbin/upgraded`. LuCI's
+**System → Backup / Flash Firmware** screen performs the same validation and
+shows the checksum with an explicit Cancel, which is the gentler route.
+
+Both images declare `compat_version 1.1`, so no `-F` is needed. The point of no
+return is the line `Commencing upgrade. Closing all shell sessions.` — do not
+cut power after it appears.
+
+The first boot formats the JFFS2 overlay and OpenWrt typically reboots once on
+its own. Allow **five minutes**, and watch with `ping 192.168.1.1` rather than
+the LEDs. LuCI should answer well under a minute on subsequent boots, which is
+faster than ROOTer's three to four. Cellular data lags the web UI by 20–60 s
+while MBIM attaches. The build's LAN address is also `192.168.1.1`.
+
+### Unverified until first boot
+
+That it boots at all; which physical lamp each LED label drives; whether
+`wlan0` is the 2.4 GHz interface on this build; the reset button after the
+pinmux change; which physical jack is `lan1` versus `lan2`; SPI stability at
+50 MHz (`dmesg | grep -i squashfs` after a few hours); whether the first-boot
+`uci-defaults` applied (`uci show system`); and whether MBIM attaches with
+`pdptype ipv4`.
+
+---
+
+## 10. Reference material in this repository
+
+`my_router.dtb` and `mk01k21.dts` at the repository root are a dump of the
+**ROOTer** device tree from the running device — kernel ~5.10 / OpenWrt 22.03,
+DSA switch, `mtk,mt7621-sysc`. They are *not* the OEM device tree. The OEM
+firmware was LEDE 17.01 (BusyBox 1.26.2, kernel 4.4, swconfig), and no dump of
+it exists here.
