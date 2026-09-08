@@ -6,21 +6,21 @@ config defaults
 	# Software flow offloading moves established connections onto the kernel's
 	# fast path and cuts routing CPU noticeably on a dual-core 880 MHz MIPS.
 	#
-	# Shipped OFF on purpose. ROOTer runs without it today, and this device
-	# carries a work VPN the owner depends on -- offloading changes how forwarded
-	# packets traverse the stack, so enabling it in the same change as a whole new
-	# firmware would make it a candidate cause for any tunnel misbehaviour.
-	# Confirm the baseline first, then enable it with one click under
-	# Network -> Firewall -> Settings and re-test the VPN.
+	# ON, on evidence: the owner runs software offloading on this device under
+	# ROOTer today, with the work VPN working through it. An earlier revision of
+	# this file shipped it off on the assumption that ROOTer ran without it --
+	# that assumption was wrong, and turning it off would have been a regression
+	# from the known-good baseline rather than a conservative default.
 	#
-	# Note when you do: offloaded flows bypass conntrack accounting, which is why
-	# data usage here is tracked with vnstat (kernel interface counters) rather
-	# than a conntrack-based per-host tool. Offloading is also incompatible with
-	# SQM traffic shaping -- enable one or the other, not both.
-	option flow_offloading '0'
-	# Hardware offloading stays off regardless. MT7621's hardware path lives in
-	# the MT7530 PPE and can only accelerate flows between the switch's own
-	# Ethernet ports, so on a USB MBIM WAN it would accelerate nothing.
+	# Two consequences that are handled elsewhere and should stay handled:
+	# offloaded flows bypass conntrack accounting, which is why data usage is
+	# tracked with vnstat (kernel interface counters) rather than a
+	# conntrack-based per-host tool; and offloading is incompatible with SQM
+	# traffic shaping, so do not enable both.
+	option flow_offloading '1'
+	# Hardware offloading stays off. MT7621's hardware path lives in the MT7530
+	# PPE and can only accelerate flows between the switch's own Ethernet ports,
+	# so on a USB MBIM WAN it would accelerate nothing while adding risk.
 	option flow_offloading_hw '0'
 
 config zone
