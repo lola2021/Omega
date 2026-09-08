@@ -42,6 +42,7 @@ return view.extend({
 		var cell = parser.parseServingCell(data.serving_cell);
 		var carriers = parser.parseCaInfo(data.carrier_aggregation);
 		var operator = parser.parseOperatorInfo(data.operator);
+		var spn = parser.parseSpn(data.spn);
 		var network = parser.parseNetworkJson(data.network_json);
 
 		/* AT+QCSQ and AT+QENG report overlapping metrics, and either source can
@@ -68,7 +69,8 @@ return view.extend({
 			error: data.error,
 			model: parser.firstValue(data.model) || data.usb_product || 'Quectel RM520N-GL',
 			firmware: parser.firstValue(data.firmware),
-			operator: operator.operator || '',
+			operator: spn || operator.operator || '',
+			operatorPlmn: operator.operator || '',
 			operatorAct: operator.act || '',
 			imei: parser.parseIdentifier(data.imei),
 			imsi: parser.parseIdentifier(data.imsi),
@@ -162,6 +164,8 @@ return view.extend({
 					E('h3', {}, _('Signal details')),
 					E('table', { 'class': 'table' }, [
 						row(_('Network'), signal.mode || radio.mode),
+						row(_('Operator'), status.operator),
+						row(_('PLMN'), status.operatorPlmn || radio.plmn),
 						row(_('Registered as'), status.operatorAct),
 						row(_('CSQ'), status.csq.csq),
 						row(_('Signal strength'), status.signalPercent !== null ? status.signalPercent + '%' : ''),

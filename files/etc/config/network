@@ -6,6 +6,11 @@ config interface 'loopback'
 
 config globals 'globals'
 	option ula_prefix 'fd00::/48'
+	# Spread receive processing across both MIPS cores instead of pinning it to
+	# CPU0. Worth having here because the cellular WAN arrives over USB, and USB
+	# interrupt handling on one core is a real bottleneck on this SoC. Toggle it
+	# under Network -> Interfaces -> Global network options if it ever hurts.
+	option packet_steering '1'
 
 config device 'br-lan'
 	option name 'br-lan'
@@ -42,3 +47,9 @@ config interface 'wan_cellular'
 	option auto '1'
 	option peerdns '1'
 	option defaultroute '1'
+	# MTU is deliberately NOT set. On MBIM the network dictates the usable MTU
+	# and netifd applies whatever the modem reports; pinning 1500 on a path whose
+	# real MTU is lower (carriers commonly hand out 1428-1500) black-holes large
+	# packets instead of raising throughput. MSS clamping on the wan zone
+	# (mtu_fix, already enabled) is what makes TCP behave across that boundary.
+	# After first boot, read the real value with: ip link show wwan0

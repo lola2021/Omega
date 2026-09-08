@@ -16,6 +16,22 @@ CONFIG_PACKAGE_luci-proto-mbim=y
 CONFIG_PACKAGE_luci-proto-qmi=y
 CONFIG_PACKAGE_luci-theme-bootstrap=y
 CONFIG_PACKAGE_luci-app-firewall=y
+# Themes. luci-theme-bootstrap already registers Bootstrap, BootstrapDark and
+# BootstrapLight, so dark mode needs no extra package -- it is a choice under
+# System -> System -> Language and Style. These two are the more modern-looking
+# official themes, both light-only, added so the theme can be chosen on the
+# device rather than baked in here.
+CONFIG_PACKAGE_luci-theme-openwrt-2020=y
+CONFIG_PACKAGE_luci-theme-material=y
+# Data usage accounting. vnstat counts bytes per interface from the kernel's own
+# counters, so it stays accurate with flow offloading enabled -- unlike
+# conntrack-based per-host accounting, which offloaded flows bypass.
+CONFIG_PACKAGE_vnstat2=y
+CONFIG_PACKAGE_luci-app-vnstat2=y
+# User-defined one-click shell commands in LuCI, which is how ROOTer's ad-hoc
+# diagnostic pages (ping test, debug information) are reproduced without
+# shipping a bespoke UI for each.
+CONFIG_PACKAGE_luci-app-commands=y
 
 # Cellular & Modem Stack (Quectel RM520N-GL: MBIM & QMI support)
 CONFIG_PACKAGE_umbim=y

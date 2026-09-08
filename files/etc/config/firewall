@@ -3,6 +3,20 @@ config defaults
 	option input 'REJECT'
 	option output 'ACCEPT'
 	option forward 'REJECT'
+	# Software flow offloading. Moves established connections onto the kernel's
+	# fast path and cuts routing CPU noticeably on a dual-core 880 MHz MIPS.
+	#
+	# Deliberately software only. MT7621's HARDWARE offload runs in the MT7530
+	# PPE, which can only accelerate flows between the switch's own Ethernet
+	# ports -- a USB MBIM interface is not something it can see, so on a
+	# cellular WAN hardware offload would add risk and accelerate nothing.
+	#
+	# Offloaded flows bypass conntrack accounting, which is why data usage is
+	# tracked with vnstat (kernel interface counters) rather than a per-host
+	# conntrack accounting tool. Turn this off under Network -> Firewall if you
+	# later enable SQM, since traffic shaping and offloading are incompatible.
+	option flow_offloading '1'
+	option flow_offloading_hw '0'
 
 config zone
 	option name 'lan'

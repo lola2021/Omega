@@ -355,6 +355,25 @@ function parseOperatorInfo(raw) {
 	};
 }
 
+/* AT+QSPN carries the readable service provider name from the SIM:
+ *
+ *   +QSPN: "<full name>","<short name>","<SPN>",<alphabet>,"<RPLMN>"
+ *
+ * Needed because AT+COPS reports a numeric PLMN on this firmware. Some SIMs
+ * leave every name field empty, and some report a bare PLMN as the "name", so
+ * an all-digit answer is rejected rather than shown as if it were a brand. */
+function parseSpn(raw) {
+	var line = responseLines(raw).filter(function(item) { return item.indexOf('+QSPN:') === 0; })[0] || '';
+	var values = parseCsv(line.replace(/^\+QSPN:\s*/, ''));
+	var i, name;
+	for (i = 0; i < values.length && i < 3; i++) {
+		name = (values[i] || '').trim();
+		if (name && !/^\d+$/.test(name))
+			return name;
+	}
+	return '';
+}
+
 function parseIdentifier(raw) {
 	var lines = responseLines(raw), match;
 	for (var i = 0; i < lines.length; i++) {
@@ -397,6 +416,7 @@ return {
 	parseTemperature: parseTemperature,
 	parseOperator: parseOperator,
 	parseOperatorInfo: parseOperatorInfo,
+	parseSpn: parseSpn,
 	parseIdentifier: parseIdentifier,
 	maskIdentifier: maskIdentifier,
 	parseNetworkJson: parseNetworkJson

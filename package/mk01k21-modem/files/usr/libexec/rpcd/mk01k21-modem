@@ -224,6 +224,13 @@ handle_status() {
 		add_at_result iccid 'AT+QCCID' "$port"
 		add_at_result phone_number 'AT+CNUM' "$port"
 		add_at_result sim 'AT+CPIN?' "$port"
+		# The service provider name from the SIM. Deliberately inside the "full"
+		# block: AT+COPS reports the operator as a numeric PLMN on this firmware
+		# (format 2), and the readable name has to come from somewhere -- but it
+		# does not change while attached, so it is fetched once on page load
+		# rather than on every poll, which would hold the serial lock for longer
+		# on each refresh for a value that never moves.
+		add_at_result spn 'AT+QSPN' "$port"
 	fi
 	add_at_result operator 'AT+COPS?' "$port"
 	add_at_result csq 'AT+CSQ' "$port"

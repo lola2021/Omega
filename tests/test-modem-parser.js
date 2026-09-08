@@ -206,6 +206,16 @@ eq(operator.numeric, true, 'operator is reported numerically');
 eq(operator.act, 'NR5G-SA', 'access technology 11 is NR5G-SA');
 eq(parser.parseOperator('+COPS: 0,0,"T-Mobile",11\r\nOK'), 'T-Mobile', 'alphanumeric operator name');
 
+/* ---------------------------------------------------------------- AT+QSPN */
+
+eq(parser.parseSpn('AT+QSPN\r\n+QSPN: "T-Mobile","TMO","",0,"310260"\r\n\r\nOK\r\n'), 'T-Mobile',
+	'service provider name from the SIM');
+eq(parser.parseSpn('+QSPN: "","TMO","",0,"310260"\r\nOK'), 'TMO', 'falls back to the short name');
+eq(parser.parseSpn('+QSPN: "310260","","",0,"310260"\r\nOK'), '',
+	'an all-digit name is a PLMN, not a brand, and is rejected');
+eq(parser.parseSpn('+QSPN: "","","",0,"00000"\r\nOK'), '', 'empty name fields yield nothing');
+eq(parser.parseSpn('ERROR'), '', 'unsupported QSPN yields nothing');
+
 /* ------------------------------------------------------- unchanged helpers */
 
 deepEq(parser.parseQrsrp('+QRSRP: -83,-77,-140,-140,NR5G\r\nOK'),
