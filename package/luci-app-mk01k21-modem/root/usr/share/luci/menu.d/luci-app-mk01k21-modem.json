@@ -18,9 +18,21 @@
 			"acl": [ "luci-app-mk01k21-modem" ]
 		}
 	},
+	"admin/modem/profile": {
+		"title": "Connection Profile",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "mk01k21-modem/profile"
+		},
+		"depends": {
+			"acl": [ "luci-app-mk01k21-modem" ],
+			"uci": { "network": { "wan_cellular": true } }
+		}
+	},
 	"admin/modem/at": {
 		"title": "AT Console",
-		"order": 20,
+		"order": 30,
 		"action": {
 			"type": "view",
 			"path": "mk01k21-modem/at"

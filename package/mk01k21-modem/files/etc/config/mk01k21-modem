@@ -1,7 +1,9 @@
 config modem 'main'
 	option at_port '/dev/ttyUSB2'
+	# Fallback only. The live control device is read from
+	# network.<interface>.device; this is used before that exists.
 	option wdm_device '/dev/cdc-wdm0'
 	option interface 'wan_cellular'
-	option refresh_interval '10'
+	option refresh_interval '30'
 	option mask_identifiers '1'
 	option at_timeout '8'

@@ -38,8 +38,15 @@ jobs:
         run: |
           git diff --check
           sh -n package/mk01k21-modem/files/usr/libexec/rpcd/mk01k21-modem
+          sh -n package/mk01k21-modem/files/usr/libexec/mk01k21-modem-led
+          sh -n package/mk01k21-modem/files/etc/hotplug.d/iface/30-mk01k21-modem-led
+          sh -n files/etc/init.d/modem-power
+          sh -n files/etc/uci-defaults/98-leds
+          sh -n files/etc/uci-defaults/99-cellular-setup
           sh -n tests/test-modem-backend.sh
+          sh -n tests/test-modem-leds.sh
           sh tests/test-modem-backend.sh
+          sh tests/test-modem-leds.sh
           node tests/test-modem-parser.js
           python3 -m json.tool package/luci-app-mk01k21-modem/root/usr/share/luci/menu.d/luci-app-mk01k21-modem.json >/dev/null
           python3 -m json.tool package/luci-app-mk01k21-modem/root/usr/share/rpcd/acl.d/luci-app-mk01k21-modem.json >/dev/null
@@ -105,9 +112,16 @@ jobs:
         run: |
           make defconfig
           echo "=== Selected Target Device ==="
-          grep -i "CONFIG_TARGET_ramips_mt7621_DEVICE_mesh_mk01k21" .config || true
-          echo "=== Selected Cellular Packages ==="
-          grep -E "CONFIG_PACKAGE_(luci-proto-mbim|umbim|kmod-usb-net-cdc-mbim|mk01k21-modem|luci-app-mk01k21-modem)" .config || true
+          grep -q "^CONFIG_TARGET_ramips_mt7621_DEVICE_mesh_mk01k21=y" .config \
+            || { echo "::error::target device not selected after defconfig"; exit 1; }
+          echo "  mesh_mk01k21 selected"
+          echo "=== Required Packages ==="
+          for sym in luci-proto-mbim umbim kmod-usb-net-cdc-mbim sms-tool \
+                     mk01k21-modem luci-app-mk01k21-modem; do
+            grep -q "^CONFIG_PACKAGE_$sym=y" .config \
+              || { echo "::error::CONFIG_PACKAGE_$sym was dropped by defconfig"; exit 1; }
+            echo "  ok  $sym"
+          done
 
       - name: Download Dependency Tarballs
         working-directory: openwrt
@@ -138,6 +152,26 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           echo "Generated Artifacts:"
           ls -lh
+
+          echo "=== Verifying the sysupgrade image ==="
+          IMG=$(ls *squashfs-sysupgrade.bin 2>/dev/null | head -1)
+          [ -n "$IMG" ] || { echo "::error::no sysupgrade image was produced"; exit 1; }
+
+          # Firmware partition is 0x00fb0000 = 16,449,536 bytes (DTS partition@50000).
+          LIMIT=16449536
+          SIZE=$(wc -c < "$IMG")
+          echo "  image: $IMG"
+          echo "  size : $SIZE of $LIMIT bytes ($((SIZE * 100 / LIMIT))% used, $((LIMIT - SIZE)) free)"
+          [ "$SIZE" -le "$LIMIT" ] || { echo "::error::image exceeds the firmware partition"; exit 1; }
+
+          echo "=== Verifying both custom packages are installed in the image ==="
+          MAN=$(ls *.manifest 2>/dev/null | head -1)
+          [ -n "$MAN" ] || { echo "::error::no package manifest was produced"; exit 1; }
+          for pkg in mk01k21-modem luci-app-mk01k21-modem umbim sms-tool jshn rpcd; do
+            grep -q "^$pkg " "$MAN" \
+              || { echo "::error::$pkg is missing from the image manifest"; exit 1; }
+            echo "  ok  $pkg"
+          done
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4

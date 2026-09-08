@@ -3,7 +3,7 @@
 		"description": "Grant access to the MK01K21 modem application",
 		"read": {
 			"ubus": {
-				"mk01k21-modem": [ "status", "ports" ]
+				"mk01k21-modem": [ "status", "ports", "rat" ]
 			},
 			"uci": [ "mk01k21-modem", "network" ]
 		},
@@ -11,7 +11,7 @@
 			"ubus": {
 				"mk01k21-modem": [ "at", "power" ]
 			},
-			"uci": [ "mk01k21-modem" ]
+			"uci": [ "mk01k21-modem", "network" ]
 		}
 	}
 }

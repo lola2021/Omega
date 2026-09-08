@@ -1,0 +1,28 @@
+#!/bin/sh
+# /etc/uci-defaults/98-leds
+# First-boot LED configuration for the Mesh MK01K21.
+#
+# mesh,mk01k21 is not in ramips' board.d/01_leds, so OpenWrt generates no LED
+# config for this board and every LED except the device-tree status LED would
+# stay dark. These are the settings verified working on the OEM/ROOTer build.
+#
+# The device tree already owns the top-panel lamp via its led-boot /
+# led-running / led-failsafe / led-upgrade aliases (top:5gblue solid once the
+# system is up, top:5gred for failsafe and sysupgrade), so it is not set here.
+#
+# The four cellular LEDs are event-driven, not trigger-driven: see
+# /usr/libexec/mk01k21-modem-led and /etc/hotplug.d/iface/30-mk01k21-modem-led.
+
+# Wi-Fi: netdev trigger on the 2.4 GHz interface. CONFIG_LEDS_TRIGGER_NETDEV is
+# built into the OpenWrt kernel, so this needs no extra package.
+if ! uci -q get system.led_wifi0 >/dev/null; then
+	uci set system.led_wifi0=led
+	uci set system.led_wifi0.name='WIFI'
+	uci set system.led_wifi0.sysfs='blue:wifi'
+	uci set system.led_wifi0.trigger='netdev'
+	uci set system.led_wifi0.dev='wlan0'
+	uci set system.led_wifi0.mode='link tx rx'
+	uci commit system
+fi
+
+exit 0

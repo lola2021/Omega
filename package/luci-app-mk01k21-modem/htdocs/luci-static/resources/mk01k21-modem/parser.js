@@ -55,6 +55,34 @@ function parseCsq(raw) {
 	};
 }
 
+function parseQrsrp(raw) {
+	var line = responseLines(raw).filter(function(item) { return item.indexOf('+QRSRP:') === 0; })[0] || '';
+	var matches = line.replace(/^\+QRSRP:\s*/, '').match(/-?\d+/g) || [];
+	var chains = matches.map(Number).filter(function(value) { return value >= -160 && value <= -40; });
+	return {
+		chains: chains,
+		primary: chains.length ? chains[0] : null,
+		diversity: chains.length > 1 ? chains[1] : null
+	};
+}
+
+function signalPercent(rsrp) {
+	if (rsrp === undefined || rsrp === null || isNaN(Number(rsrp)))
+		return null;
+	rsrp = Number(rsrp);
+	if (rsrp <= -120)
+		return 0;
+	if (rsrp >= -80)
+		return 100;
+	return Math.round((rsrp + 120) * 2.5);
+}
+
+function parsePhoneNumber(raw) {
+	var line = responseLines(raw).filter(function(item) { return item.indexOf('+CNUM:') === 0; })[0] || '';
+	var values = parseCsv(line.replace(/^\+CNUM:\s*/, ''));
+	return values.length > 1 ? values[1] : '';
+}
+
 function parseNetworkInfo(raw) {
 	var line = responseLines(raw).filter(function(item) { return item.indexOf('+QNWINFO:') === 0; })[0] || '';
 	var values = parseCsv(line.replace(/^\+QNWINFO:\s*/, ''));
@@ -69,15 +97,30 @@ function parseNetworkInfo(raw) {
 function parseServingCell(raw) {
 	var line = responseLines(raw).filter(function(item) { return item.indexOf('+QENG:') === 0 && item.indexOf('servingcell') !== -1; })[0] || '';
 	var values = parseCsv(line.replace(/^\+QENG:\s*/, ''));
+	var cellId, shortHex = '', nodeHex = '', tac = '', i;
 	if (values.length < 10)
 		return {};
+	cellId = values[6] || '';
+	if (/^[0-9A-F]+$/i.test(cellId) && /[A-F]/i.test(cellId) && cellId.length > 3) {
+		shortHex = cellId.slice(-3).toUpperCase();
+		nodeHex = cellId.slice(0, -3).toUpperCase();
+	}
+	for (i = 10; i < values.length; i++) {
+		if (/^[0-9A-F]{4,8}$/i.test(values[i]) && /[A-F]/i.test(values[i])) {
+			tac = values[i].toUpperCase();
+			break;
+		}
+	}
 	return {
 		state: values[1],
 		mode: values[2],
 		duplex: values[3],
 		mcc: values[4],
 		mnc: values[5],
-		cell_id: values[6],
+		cell_id: cellId,
+		short_cell: shortHex ? shortHex + ' (' + parseInt(shortHex, 16) + ')' : '',
+		node_id: nodeHex ? nodeHex + ' (' + parseInt(nodeHex, 16) + ')' : '',
+		tac: tac ? tac + ' (' + parseInt(tac, 16) + ')' : '',
 		pci: values[7],
 		channel: values[8],
 		band: values[9],
@@ -134,6 +177,9 @@ return {
 	parseCsv: parseCsv,
 	parseQcsq: parseQcsq,
 	parseCsq: parseCsq,
+	parseQrsrp: parseQrsrp,
+	signalPercent: signalPercent,
+	parsePhoneNumber: parsePhoneNumber,
 	parseNetworkInfo: parseNetworkInfo,
 	parseServingCell: parseServingCell,
 	parseTemperature: parseTemperature,

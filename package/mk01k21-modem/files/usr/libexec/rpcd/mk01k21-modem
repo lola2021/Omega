@@ -6,7 +6,11 @@
 [ "${MK01K21_MODEM_TEST:-0}" = "1" ] || . /usr/share/libubox/jshn.sh
 
 LOCK_DIR=/tmp/mk01k21-modem.lock
+LOCK_STALE_MIN=5
+LOCK_HELD=0
 MAX_AT_LENGTH=256
+AT_ATTEMPTS=0
+AT_FAILURES=0
 
 config_get() {
 	uci -q get "mk01k21-modem.main.$1" 2>/dev/null || printf '%s' "$2"
@@ -14,6 +18,10 @@ config_get() {
 
 valid_port() {
 	printf '%s' "$1" | grep -Eq '^/dev/tty(USB|ACM)[0-9]+$'
+}
+
+valid_uci_name() {
+	printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_]+$'
 }
 
 valid_at_command() {
@@ -29,24 +37,73 @@ valid_at_command() {
 	return 0
 }
 
-acquire_lock() {
-	local owner
-	if mkdir "$LOCK_DIR" 2>/dev/null; then
-		printf '%s\n' "$$" > "$LOCK_DIR/pid"
+lock_owner() {
+	cat "$LOCK_DIR/pid" 2>/dev/null
+}
+
+# Claim the lock. mkdir is the atomic gate: exactly one caller can create the
+# directory. The pid is published via a rename so it appears atomically and a
+# reader never sees a half-written value.
+claim_lock() {
+	mkdir "$LOCK_DIR" 2>/dev/null || return 1
+	printf '%s\n' "$$" > "$LOCK_DIR/pid.$$" 2>/dev/null
+	mv "$LOCK_DIR/pid.$$" "$LOCK_DIR/pid" 2>/dev/null
+	LOCK_HELD=1
+	return 0
+}
+
+# Is this pid still running? /proc is authoritative and, unlike "kill -0",
+# permission-independent: kill -0 against a process owned by another user
+# fails with EPERM, which would wrongly look like "the owner is gone" and
+# hand the serial port to a second caller.
+process_alive() {
+	local pid="$1"
+	[ -n "$pid" ] || return 1
+	case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+	[ -d /proc ] && { [ -d "/proc/$pid" ]; return $?; }
+	kill -0 "$pid" 2>/dev/null
+}
+
+lock_is_stale() {
+	local owner="$1"
+
+	if [ -n "$owner" ]; then
+		# A live owner is never stale.
+		process_alive "$owner" && return 1
 		return 0
 	fi
 
-	owner="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
-	if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-		return 1
-	fi
+	# No pid published yet. The winner of mkdir writes it within microseconds,
+	# so treat this as HELD rather than stale - assuming stale here is exactly
+	# how two callers end up on the serial port at once. Only an owner killed
+	# inside that window leaves the directory pidless, so fall back to age.
+	[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin "+$LOCK_STALE_MIN" 2>/dev/null)" ]
+}
 
-	rm -rf "$LOCK_DIR"
-	mkdir "$LOCK_DIR" 2>/dev/null || return 1
-	printf '%s\n' "$$" > "$LOCK_DIR/pid"
+acquire_lock() {
+	local owner graveyard
+
+	claim_lock && return 0
+
+	owner="$(lock_owner)"
+	lock_is_stale "$owner" || return 1
+
+	# Reclaim a stale lock by RENAMING it, never by removing it in place.
+	# rename is atomic, so when two callers race here only one moves the
+	# directory; the loser's mv fails and it simply retries mkdir. Removing
+	# "$LOCK_DIR" directly would let one caller delete a lock another caller
+	# had already legitimately re-created.
+	graveyard="$LOCK_DIR.stale.$$"
+	mv "$LOCK_DIR" "$graveyard" 2>/dev/null && rm -rf "$graveyard"
+
+	claim_lock
 }
 
 release_lock() {
+	# Only ever release a lock this process actually owns.
+	[ "$LOCK_HELD" = "1" ] || return 0
+	[ "$(lock_owner)" = "$$" ] || return 0
+	LOCK_HELD=0
 	rm -rf "$LOCK_DIR"
 }
 
@@ -74,13 +131,51 @@ add_at_result() {
 	local name="$1"
 	local command="$2"
 	local port="$3"
-	local output
+	local output rc
 	output="$(run_at "$port" "$command")"
+	rc=$?
+	AT_ATTEMPTS=$((AT_ATTEMPTS + 1))
+	[ "$rc" -eq 0 ] || AT_FAILURES=$((AT_FAILURES + 1))
 	json_add_string "$name" "$output"
 }
 
+add_at_health() {
+	json_add_int at_attempts "$AT_ATTEMPTS"
+	json_add_int at_failures "$AT_FAILURES"
+	if [ "$AT_FAILURES" -le 0 ]; then
+		json_add_boolean at_degraded 0
+		return
+	fi
+	json_add_boolean at_degraded 1
+	if [ "$AT_FAILURES" -ge "$AT_ATTEMPTS" ]; then
+		json_add_string at_error "The modem did not answer any AT command on $1. It may be resetting or re-enumerating on USB."
+	else
+		json_add_string at_error "$AT_FAILURES of $AT_ATTEMPTS AT commands failed or timed out."
+	fi
+}
+
+network_get() {
+	uci -q get "network.$1.$2" 2>/dev/null || printf '%s' "$3"
+}
+
+add_usb_identity() {
+	local path vendor product manufacturer model
+	for path in /sys/bus/usb/devices/*; do
+		[ -r "$path/idVendor" ] && [ -r "$path/idProduct" ] || continue
+		vendor="$(cat "$path/idVendor" 2>/dev/null)"
+		[ "$vendor" = "2c7c" ] || continue
+		product="$(cat "$path/idProduct" 2>/dev/null)"
+		manufacturer="$(cat "$path/manufacturer" 2>/dev/null)"
+		model="$(cat "$path/product" 2>/dev/null)"
+		json_add_string usb_id "$vendor:$product"
+		json_add_string usb_manufacturer "$manufacturer"
+		json_add_string usb_product "$model"
+		return
+	done
+}
+
 handle_status() {
-	local input full port interface wdm network_json
+	local input full port interface wdm network_json apn pdptype
 	input="$(cat)"
 	json_load "${input:-{}}" || {
 		json_error "Invalid request"
@@ -89,7 +184,15 @@ handle_status() {
 	json_get_var full full
 	port="$(config_get at_port /dev/ttyUSB2)"
 	interface="$(config_get interface wan_cellular)"
-	wdm="$(config_get wdm_device /dev/cdc-wdm0)"
+	valid_uci_name "$interface" || {
+		json_error "Configured cellular interface name is invalid: $interface"
+		return
+	}
+	# The authoritative control device is the one the interface actually uses;
+	# the local option is only a fallback for a not-yet-configured interface.
+	wdm="$(network_get "$interface" device "$(config_get wdm_device /dev/cdc-wdm0)")"
+	apn="$(network_get "$interface" apn '')"
+	pdptype="$(network_get "$interface" pdptype ipv4)"
 
 	require_port "$port" || {
 		json_error "Configured AT port is unavailable: $port"
@@ -107,8 +210,11 @@ handle_status() {
 	json_add_string at_port "$port"
 	json_add_string wdm_device "$wdm"
 	json_add_string interface "$interface"
+	json_add_string apn "$apn"
+	json_add_string pdptype "$pdptype"
 	json_add_string network_json "$network_json"
 	json_add_int timestamp "$(date +%s)"
+	add_usb_identity
 	if [ "$full" = "1" ]; then
 		add_at_result identity 'ATI' "$port"
 		add_at_result model 'AT+CGMM' "$port"
@@ -116,15 +222,18 @@ handle_status() {
 		add_at_result imei 'AT+CGSN' "$port"
 		add_at_result imsi 'AT+CIMI' "$port"
 		add_at_result iccid 'AT+QCCID' "$port"
+		add_at_result phone_number 'AT+CNUM' "$port"
 		add_at_result sim 'AT+CPIN?' "$port"
 	fi
 	add_at_result operator 'AT+COPS?' "$port"
 	add_at_result csq 'AT+CSQ' "$port"
 	add_at_result qcsq 'AT+QCSQ' "$port"
+	add_at_result qrsrp 'AT+QRSRP' "$port"
 	add_at_result network_info 'AT+QNWINFO' "$port"
 	add_at_result serving_cell 'AT+QENG="servingcell"' "$port"
 	add_at_result carrier_aggregation 'AT+QCAINFO' "$port"
 	add_at_result temperature 'AT+QTEMP' "$port"
+	add_at_health "$port"
 	json_dump
 }
 
@@ -188,13 +297,16 @@ handle_power() {
 			rc=$?
 			;;
 		cycle)
-			acquire_lock || {
-				json_error "The modem is busy; try again shortly"
-				return
-			}
-			trap release_lock EXIT INT TERM
-			output="$(/etc/init.d/modem-power restart 2>&1)"
-			rc=$?
+			# Not exposed. On this board the OEM device tree names GPIO 6
+			# "gpio_pcie0_power", and PCIe0 carries the MT7915 DBDC host
+			# interface, so driving this line at runtime most likely drops
+			# both Wi-Fi bands rather than power-cycling the modem. ROOTer
+			# ships no configured modem-power GPIO for this board either and
+			# recovers over AT instead. Use the "restart" action; for
+			# deliberate, supervised identification of the line, invoke
+			# /etc/init.d/modem-power from a shell.
+			json_error "GPIO power cycling is disabled on this board: the modem power line is not identified"
+			return
 			;;
 		*)
 			json_error "Unsupported recovery action"
@@ -208,6 +320,35 @@ handle_power() {
 	json_add_string action "$action"
 	json_add_string output "$output"
 	[ "$rc" -eq 0 ] || json_add_string error "The recovery action failed"
+	json_dump
+}
+
+handle_rat() {
+	local port output
+	port="$(config_get at_port /dev/ttyUSB2)"
+	require_port "$port" || {
+		json_error "Configured AT port is unavailable: $port"
+		return
+	}
+	acquire_lock || {
+		json_error "The modem is busy; try again shortly"
+		return
+	}
+	trap release_lock EXIT INT TERM
+
+	# Deliberately ONE command. This exists so the LED helper can learn the
+	# radio access technology without running the full status sweep, and
+	# without opening the serial port outside this lock.
+	output="$(run_at "$port" 'AT+QNWINFO')"
+	json_init
+	json_add_boolean ok 1
+	json_add_string output "$output"
+	case "$output" in
+		*NR5G*) json_add_string rat "5G" ;;
+		*LTE*)  json_add_string rat "LTE" ;;
+		*WCDMA*|*HSPA*) json_add_string rat "3G" ;;
+		*) json_add_string rat "" ;;
+	esac
 	json_dump
 }
 
@@ -231,7 +372,7 @@ handle_ports() {
 main() {
 	case "$1" in
 		list)
-			printf '%s\n' '{"status":{"full":"Boolean"},"at":{"command":"String"},"power":{"action":"String"},"ports":{}}'
+			printf '%s\n' '{"status":{"full":"Boolean"},"at":{"command":"String"},"power":{"action":"String"},"ports":{},"rat":{}}'
 			;;
 		call)
 			case "$2" in
@@ -239,6 +380,7 @@ main() {
 				at) handle_at ;;
 				power) handle_power ;;
 				ports) handle_ports ;;
+				rat) handle_rat ;;
 				*) json_error "Unknown method" ;;
 			esac
 			;;

@@ -37,28 +37,38 @@ return view.extend({
 	parse: function(data) {
 		var qcsq = parser.parseQcsq(data.qcsq);
 		var csq = parser.parseCsq(data.csq);
+		var qrsrp = parser.parseQrsrp(data.qrsrp);
 		var radio = parser.parseNetworkInfo(data.network_info);
 		var cell = parser.parseServingCell(data.serving_cell);
 		var network = parser.parseNetworkJson(data.network_json);
 		return {
 			ok: data.ok !== false,
 			error: data.error,
-			model: parser.firstValue(data.model) || 'Quectel RM520N-GL',
+			model: parser.firstValue(data.model) || data.usb_product || 'Quectel RM520N-GL',
 			firmware: parser.firstValue(data.firmware),
 			operator: parser.parseOperator(data.operator),
 			imei: parser.parseIdentifier(data.imei),
 			imsi: parser.parseIdentifier(data.imsi),
 			iccid: parser.parseIdentifier(data.iccid),
+			phoneNumber: parser.parsePhoneNumber(data.phone_number),
 			sim: parser.firstValue(data.sim).replace(/^\+CPIN:\s*/, ''),
 			qcsq: qcsq,
 			csq: csq,
+			qrsrp: qrsrp,
+			signalPercent: parser.signalPercent(qcsq.rsrp),
 			radio: radio,
 			cell: cell,
 			temperature: parser.parseTemperature(data.temperature),
 			network: network,
+			usbId: data.usb_id,
+			usbManufacturer: data.usb_manufacturer,
 			atPort: data.at_port,
 			wdmDevice: data.wdm_device,
 			interface: data.interface,
+			apn: data.apn,
+			pdpType: data.pdptype,
+			atDegraded: data.at_degraded == 1,
+			atError: data.at_error,
 			raw: data
 		};
 	},
@@ -80,6 +90,10 @@ return view.extend({
 		var cell = status.cell;
 		var radio = status.radio;
 		return E('div', { 'class': 'mkmodem-layout' }, [
+			status.atDegraded ? E('div', { 'class': 'alert-message warning' }, [
+				E('h4', {}, _('The modem is not answering fully')),
+				E('p', {}, status.atError || _('Some AT commands failed or timed out. Values below may be blank or stale.'))
+			]) : '',
 			E('section', { 'class': 'cbi-section mkmodem-hero' }, [
 				E('div', { 'class': 'mkmodem-titleline' }, [
 					E('div', {}, [
@@ -95,6 +109,7 @@ return view.extend({
 					metric('RSSI', signal.rssi !== undefined ? signal.rssi : status.csq.rssi, ' dBm')
 				]),
 				E('div', { 'class': 'mkmodem-chips' }, [
+					chip(status.signalPercent !== null ? status.signalPercent + '% signal' : ''),
 					chip(radio.band || cell.band),
 					chip(cell.bandwidth ? cell.bandwidth + ' MHz' : ''),
 					chip(cell.pci ? 'PCI ' + cell.pci : ''),
@@ -107,21 +122,43 @@ return view.extend({
 					E('h3', {}, _('Current connection')),
 					E('table', { 'class': 'table' }, [
 						row(_('Interface'), status.interface),
+						row(_('Data interface'), status.network.l3_device),
+						row(_('Protocol'), 'MBIM'),
+						row(_('APN'), status.apn),
+						row(_('PDP type'), status.pdpType),
 						row(_('Protocol device'), status.wdmDevice),
 						row(_('AT port'), status.atPort),
 						row(_('IPv4 address'), status.network['ipv4-address'] && status.network['ipv4-address'][0] ? status.network['ipv4-address'][0].address : ''),
-						row(_('Uptime'), status.network.uptime ? status.network.uptime + ' s' : '')
+						row(_('Connected'), status.network.uptime ? status.network.uptime + ' s' : '')
+					])
+				]),
+				E('section', { 'class': 'cbi-section' }, [
+					E('h3', {}, _('Signal details')),
+					E('table', { 'class': 'table' }, [
+						row(_('Network'), signal.mode || radio.mode),
+						row(_('CSQ'), status.csq.csq),
+						row(_('Signal strength'), status.signalPercent !== null ? status.signalPercent + '%' : ''),
+						row(_('RSSI'), signal.rssi !== undefined ? signal.rssi + ' dBm' : ''),
+						row(_('RSRP'), signal.rsrp !== undefined ? signal.rsrp + ' dBm' : ''),
+						row(_('Diversity RSRP'), status.qrsrp.diversity !== null ? status.qrsrp.diversity + ' dBm' : ''),
+						row(_('RSRQ'), signal.rsrq !== undefined ? signal.rsrq + ' dB' : ''),
+						row(_('SINR'), signal.sinr !== undefined ? signal.sinr + ' dB' : '')
 					])
 				]),
 				E('section', { 'class': 'cbi-section' }, [
 					E('h3', {}, _('Serving cell')),
 					E('table', { 'class': 'table' }, [
 						row(_('Radio mode'), cell.mode || radio.mode),
+						row(_('Duplex mode'), cell.duplex),
 						row(_('MCC / MNC'), cell.mcc && cell.mnc ? cell.mcc + ' / ' + cell.mnc : radio.plmn),
-						row(_('Cell ID'), cell.cell_id),
+						row(_('eNB / gNB ID'), cell.node_id),
+						row(_('TAC'), cell.tac),
+						row(_('Short cell ID'), cell.short_cell),
+						row(_('Long cell ID'), cell.cell_id),
 						row(_('PCI'), cell.pci),
 						row(_('Channel'), cell.channel || radio.channel),
-						row(_('Band'), cell.band || radio.band)
+						row(_('Band'), cell.band || radio.band),
+						row(_('Bandwidth'), cell.bandwidth ? cell.bandwidth + ' MHz' : '')
 					])
 				])
 			]),
@@ -131,8 +168,11 @@ return view.extend({
 					E('h3', {}, _('Modem and SIM')),
 					E('table', { 'class': 'table' }, [
 						row(_('Model'), status.model),
+						row(_('USB ID'), status.usbId),
+						row(_('Manufacturer'), status.usbManufacturer),
 						row(_('Firmware'), status.firmware),
 						row(_('SIM status'), status.sim),
+						row(_('SIM phone number'), this.identifier(status.phoneNumber)),
 						row(_('IMEI'), this.identifier(status.imei)),
 						row(_('IMSI'), this.identifier(status.imsi)),
 						row(_('ICCID'), this.identifier(status.iccid))
@@ -140,11 +180,9 @@ return view.extend({
 				]),
 				E('section', { 'class': 'cbi-section' }, [
 					E('h3', {}, _('Recovery')),
-					E('p', {}, _('Restart the modem firmware first. Use the GPIO power cycle only when the modem no longer responds.')),
+					E('p', {}, _('Restarts the modem firmware with AT+CFUN=1,1. The modem leaves the USB bus and re-attaches a few seconds later.')),
 					E('div', { 'class': 'right' }, [
-						E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'confirmPower', 'restart') }, _('Restart modem')),
-						' ',
-						E('button', { 'class': 'btn cbi-button-negative', 'click': ui.createHandlerFn(this, 'confirmPower', 'cycle') }, _('Power cycle'))
+						E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'confirmPower', 'restart') }, _('Restart modem'))
 					])
 				])
 			]),
@@ -153,6 +191,8 @@ return view.extend({
 				E('summary', {}, _('Raw diagnostic output')),
 				E('h4', {}, 'AT+QENG="servingcell"'),
 				E('pre', {}, data.serving_cell || ''),
+				E('h4', {}, 'AT+QRSRP'),
+				E('pre', {}, data.qrsrp || ''),
 				E('h4', {}, 'AT+QCAINFO'),
 				E('pre', {}, data.carrier_aggregation || ''),
 				E('h4', {}, 'AT+QTEMP'),
@@ -180,29 +220,29 @@ return view.extend({
 	},
 
 	confirmPower: function(action) {
-		var destructive = action === 'cycle';
-		ui.showModal(destructive ? _('Power cycle modem?') : _('Restart modem?'), [
-			E('p', {}, destructive
-				? _('Cellular service will be interrupted while GPIO 6 turns the modem off and back on.')
-				: _('Cellular service will be interrupted while the modem firmware restarts.')),
+		ui.showModal(_('Restart modem?'), [
+			E('p', {}, _('Cellular service will be interrupted while the modem firmware restarts.')),
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
 				' ',
 				E('button', {
-					'class': destructive ? 'btn cbi-button-negative' : 'btn cbi-button-action',
-					'click': L.bind(function() {
+					'class': 'btn cbi-button-action',
+					'click': L.bind(function(ev) {
+						ev.target.disabled = true;
 						ui.hideModal();
 						return callPower(action).then(function(result) {
 							ui.addNotification(null, E('p', {}, result.ok ? _('Recovery action started.') : (result.error || _('Recovery action failed.'))), result.ok ? 'info' : 'error');
+						}).catch(function(error) {
+							ui.addNotification(null, E('p', {}, _('The modem service could not be reached: ') + (error.message || String(error))), 'error');
 						});
 					}, this)
-				}, destructive ? _('Power cycle') : _('Restart'))
+				}, _('Restart'))
 			])
 		]);
 	},
 
 	render: function(loadResults) {
-		this.refreshSeconds = Number(uci.get('mk01k21-modem', 'main', 'refresh_interval') || 10);
+		this.refreshSeconds = Number(uci.get('mk01k21-modem', 'main', 'refresh_interval') || 30);
 		this.maskIdentifiers = uci.get('mk01k21-modem', 'main', 'mask_identifiers') !== '0';
 		this.nextRefresh = Date.now() + (this.refreshSeconds * 1000);
 		this.lastData = loadResults[1];

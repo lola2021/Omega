@@ -1,0 +1,112 @@
+#!/bin/sh
+# Cellular status LEDs for the Mesh MK01K21.
+#
+# Reproduces the behaviour of ROOTer's modem-led.sh on this board, which is:
+#
+#   4gblue   solid     connected
+#   4gorange blink     searching (slow) / connecting (fast)
+#   5gblue   solid     current RAT is 5G NR
+#   5gorange solid     attached, but not 5G
+#   all off            disconnected
+#
+# Two defects in the ROOTer original are deliberately not reproduced: its
+# "connecting" state wrote to ".../led:4gorangetrigger" (a missing slash, so
+# the timer trigger was never set), and its signal-strength blink logic sat
+# after an unconditional "exit 0" and therefore never ran at all.
+#
+# Usage: mk01k21-modem-led off|searching|connecting|connected [5G|LTE]
+#        mk01k21-modem-led rat            (query the modem and set 5g pair)
+
+LED_ROOT=/sys/class/leds
+LED_4G_BLUE="led:4gblue"
+LED_4G_ORANGE="led:4gorange"
+LED_5G_BLUE="led:5gblue"
+LED_5G_ORANGE="led:5gorange"
+
+# Every write is guarded: a board whose DTS labels differ, or a kernel without
+# the timer trigger, must degrade to doing nothing rather than erroring.
+led_present() {
+	[ -d "$LED_ROOT/$1" ]
+}
+
+led_write() {
+	led_present "$2" || return 0
+	[ -e "$LED_ROOT/$2/$1" ] || return 0
+	printf '%s\n' "$3" > "$LED_ROOT/$2/$1" 2>/dev/null
+}
+
+led_off() {
+	led_write trigger "$1" none
+	led_write brightness "$1" 0
+}
+
+led_on() {
+	led_write trigger "$1" none
+	led_write brightness "$1" 1
+}
+
+led_blink() {
+	led_write trigger "$1" timer
+	led_write delay_on "$1" "$2"
+	led_write delay_off "$1" "$3"
+}
+
+set_rat_leds() {
+	case "$1" in
+		5G|5g|NR5G*|nr5g*)
+			led_on "$LED_5G_BLUE"
+			led_off "$LED_5G_ORANGE"
+			;;
+		'')
+			# RAT unknown: leave the pair alone rather than assert a wrong one.
+			;;
+		*)
+			led_off "$LED_5G_BLUE"
+			led_on "$LED_5G_ORANGE"
+			;;
+	esac
+}
+
+# Ask the modem backend for the current radio access technology. This goes
+# through the backend's rpcd method on purpose: it reuses the one serial-port
+# lock instead of opening /dev/ttyUSB2 behind its back.
+query_rat() {
+	local reply
+	reply="$(ubus call mk01k21-modem rat 2>/dev/null)" || return 1
+	printf '%s' "$reply" | sed -n 's/.*"rat"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+case "$1" in
+	off)
+		led_off "$LED_4G_BLUE"
+		led_off "$LED_4G_ORANGE"
+		led_off "$LED_5G_BLUE"
+		led_off "$LED_5G_ORANGE"
+		;;
+	searching)
+		led_off "$LED_4G_BLUE"
+		led_blink "$LED_4G_ORANGE" 500 500
+		led_off "$LED_5G_BLUE"
+		led_off "$LED_5G_ORANGE"
+		;;
+	connecting)
+		led_off "$LED_4G_BLUE"
+		led_blink "$LED_4G_ORANGE" 200 200
+		led_off "$LED_5G_BLUE"
+		led_off "$LED_5G_ORANGE"
+		;;
+	connected)
+		led_on "$LED_4G_BLUE"
+		led_off "$LED_4G_ORANGE"
+		set_rat_leds "$2"
+		;;
+	rat)
+		set_rat_leds "$(query_rat)"
+		;;
+	*)
+		echo "usage: ${0##*/} off|searching|connecting|connected [5G|LTE]|rat" >&2
+		exit 1
+		;;
+esac
+
+exit 0

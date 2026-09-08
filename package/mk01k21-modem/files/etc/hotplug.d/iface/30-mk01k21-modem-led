@@ -1,0 +1,29 @@
+#!/bin/sh
+# Drive the MK01K21 cellular status LEDs from netifd interface events.
+#
+# Only reacts to the interface named in mk01k21-modem.main.interface, so a
+# renamed or second cellular interface does not silently do nothing.
+
+LED=/usr/libexec/mk01k21-modem-led
+[ -x "$LED" ] || exit 0
+
+WATCH="$(uci -q get mk01k21-modem.main.interface || printf '%s' wan_cellular)"
+[ "$INTERFACE" = "$WATCH" ] || exit 0
+
+case "$ACTION" in
+	ifup)
+		# Set the connected state immediately - hotplug runs serially inside
+		# netifd and must not block. The RAT needs an AT round trip, so it is
+		# resolved in the background.
+		"$LED" connected
+		( "$LED" rat ) >/dev/null 2>&1 &
+		;;
+	ifdown)
+		"$LED" off
+		;;
+	ifupdate)
+		( "$LED" rat ) >/dev/null 2>&1 &
+		;;
+esac
+
+exit 0

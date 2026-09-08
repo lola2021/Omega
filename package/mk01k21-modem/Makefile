@@ -13,12 +13,14 @@ define Package/mk01k21-modem
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=MK01K21 RM520N modem backend
-  DEPENDS:=+sms-tool +libubox +ubus +uci
+  # jshn ships /usr/share/libubox/jshn.sh (NOT libubox); rpcd hosts the
+  # /usr/libexec/rpcd/ exec plugin this package installs into.
+  DEPENDS:=+sms-tool +jshn +rpcd +ubus +uci
 endef
 
 define Package/mk01k21-modem/description
  Lightweight rpcd backend for Quectel RM520N status, AT commands,
- port discovery, restart and GPIO power-cycle recovery.
+ port discovery and AT-based modem restart.
 endef
 
 define Package/mk01k21-modem/conffiles
@@ -33,6 +35,10 @@ define Package/mk01k21-modem/install
 	$(INSTALL_CONF) ./files/etc/config/mk01k21-modem $(1)/etc/config/mk01k21-modem
 	$(INSTALL_DIR) $(1)/usr/libexec/rpcd
 	$(INSTALL_BIN) ./files/usr/libexec/rpcd/mk01k21-modem $(1)/usr/libexec/rpcd/mk01k21-modem
+	$(INSTALL_DIR) $(1)/usr/libexec
+	$(INSTALL_BIN) ./files/usr/libexec/mk01k21-modem-led $(1)/usr/libexec/mk01k21-modem-led
+	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
+	$(INSTALL_BIN) ./files/etc/hotplug.d/iface/30-mk01k21-modem-led $(1)/etc/hotplug.d/iface/30-mk01k21-modem-led
 endef
 
 $(eval $(call BuildPackage,mk01k21-modem))
