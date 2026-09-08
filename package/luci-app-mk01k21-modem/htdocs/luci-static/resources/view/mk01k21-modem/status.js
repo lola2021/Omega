@@ -40,13 +40,36 @@ return view.extend({
 		var qrsrp = parser.parseQrsrp(data.qrsrp);
 		var radio = parser.parseNetworkInfo(data.network_info);
 		var cell = parser.parseServingCell(data.serving_cell);
+		var carriers = parser.parseCaInfo(data.carrier_aggregation);
+		var operator = parser.parseOperatorInfo(data.operator);
 		var network = parser.parseNetworkJson(data.network_json);
+
+		/* AT+QCSQ and AT+QENG report overlapping metrics, and either source can
+		 * legitimately omit one: QCSQ carries no RSSI on NR5G-SA, and QENG is
+		 * deliberately blank on a radio mode whose field layout is unverified.
+		 * Each metric therefore falls back to the other command rather than
+		 * leaving the panel empty when one of the two is silent. */
+		var pick = function(a, b, c) {
+			if (a !== undefined && a !== null) return a;
+			if (b !== undefined && b !== null) return b;
+			return c === undefined ? null : c;
+		};
+		var signal = {
+			mode: qcsq.mode || cell.mode || radio.mode || '',
+			rsrp: pick(qcsq.rsrp, cell.rsrp),
+			rsrq: pick(qcsq.rsrq, cell.rsrq),
+			sinr: pick(qcsq.sinr, cell.sinr),
+			rssi: pick(qcsq.rssi, cell.rssi, csq.rssi),
+			lte: qcsq.lte
+		};
+
 		return {
 			ok: data.ok !== false,
 			error: data.error,
 			model: parser.firstValue(data.model) || data.usb_product || 'Quectel RM520N-GL',
 			firmware: parser.firstValue(data.firmware),
-			operator: parser.parseOperator(data.operator),
+			operator: operator.operator || '',
+			operatorAct: operator.act || '',
 			imei: parser.parseIdentifier(data.imei),
 			imsi: parser.parseIdentifier(data.imsi),
 			iccid: parser.parseIdentifier(data.iccid),
@@ -54,10 +77,13 @@ return view.extend({
 			sim: parser.firstValue(data.sim).replace(/^\+CPIN:\s*/, ''),
 			qcsq: qcsq,
 			csq: csq,
+			signal: signal,
 			qrsrp: qrsrp,
-			signalPercent: parser.signalPercent(qcsq.rsrp),
+			signalPercent: parser.signalPercent(signal.rsrp),
 			radio: radio,
 			cell: cell,
+			carriers: carriers,
+			carrierSummary: parser.formatCaInfo(carriers),
 			temperature: parser.parseTemperature(data.temperature),
 			network: network,
 			usbId: data.usb_id,
@@ -86,7 +112,7 @@ return view.extend({
 			]);
 
 		var connected = !!status.network.up;
-		var signal = status.qcsq;
+		var signal = status.signal;
 		var cell = status.cell;
 		var radio = status.radio;
 		return E('div', { 'class': 'mkmodem-layout' }, [
@@ -106,7 +132,7 @@ return view.extend({
 					metric('RSRP', signal.rsrp, ' dBm'),
 					metric('RSRQ', signal.rsrq, ' dB'),
 					metric('SINR', signal.sinr, ' dB'),
-					metric('RSSI', signal.rssi !== undefined ? signal.rssi : status.csq.rssi, ' dBm')
+					metric('RSSI', signal.rssi, ' dBm')
 				]),
 				E('div', { 'class': 'mkmodem-chips' }, [
 					chip(status.signalPercent !== null ? status.signalPercent + '% signal' : ''),
@@ -136,13 +162,15 @@ return view.extend({
 					E('h3', {}, _('Signal details')),
 					E('table', { 'class': 'table' }, [
 						row(_('Network'), signal.mode || radio.mode),
+						row(_('Registered as'), status.operatorAct),
 						row(_('CSQ'), status.csq.csq),
 						row(_('Signal strength'), status.signalPercent !== null ? status.signalPercent + '%' : ''),
-						row(_('RSSI'), signal.rssi !== undefined ? signal.rssi + ' dBm' : ''),
-						row(_('RSRP'), signal.rsrp !== undefined ? signal.rsrp + ' dBm' : ''),
+						row(_('RSSI'), text(signal.rssi, ' dBm')),
+						row(_('RSRP'), text(signal.rsrp, ' dBm')),
 						row(_('Diversity RSRP'), status.qrsrp.diversity !== null ? status.qrsrp.diversity + ' dBm' : ''),
-						row(_('RSRQ'), signal.rsrq !== undefined ? signal.rsrq + ' dB' : ''),
-						row(_('SINR'), signal.sinr !== undefined ? signal.sinr + ' dB' : '')
+						row(_('RSRQ'), text(signal.rsrq, ' dB')),
+						row(_('SINR'), text(signal.sinr, ' dB')),
+						row(_('LTE anchor RSRP'), signal.lte ? text(signal.lte.rsrp, ' dBm') : '')
 					])
 				]),
 				E('section', { 'class': 'cbi-section' }, [
@@ -154,11 +182,13 @@ return view.extend({
 						row(_('eNB / gNB ID'), cell.node_id),
 						row(_('TAC'), cell.tac),
 						row(_('Short cell ID'), cell.short_cell),
-						row(_('Long cell ID'), cell.cell_id),
+						row(_('Long cell ID'), cell.cell_id_dec ? cell.cell_id + ' (' + cell.cell_id_dec + ')' : cell.cell_id),
 						row(_('PCI'), cell.pci),
 						row(_('Channel'), cell.channel || radio.channel),
 						row(_('Band'), cell.band || radio.band),
-						row(_('Bandwidth'), cell.bandwidth ? cell.bandwidth + ' MHz' : '')
+						row(_('Bandwidth'), cell.bandwidth ? cell.bandwidth + ' MHz' : ''),
+						row(_('Subcarrier spacing'), cell.scs ? cell.scs + ' kHz' : ''),
+						row(_('Carrier aggregation'), status.carrierSummary)
 					])
 				])
 			]),
