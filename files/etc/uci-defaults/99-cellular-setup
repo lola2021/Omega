@@ -12,7 +12,7 @@ if ! uci -q get network.wan_cellular >/dev/null; then
 	uci set network.wan_cellular.proto='mbim'
 	uci set network.wan_cellular.device='/dev/cdc-wdm0'
 	uci set network.wan_cellular.apn='internet'
-	uci set network.wan_cellular.pdptype='ip'
+	uci set network.wan_cellular.pdptype='ipv4'
 	uci set network.wan_cellular.metric='10'
 	uci set network.wan_cellular.auto='1'
 	uci set network.wan_cellular.peerdns='1'

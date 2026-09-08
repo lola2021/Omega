@@ -1,0 +1,7 @@
+# macOS Finder metadata. These land in the firmware rootfs via the
+# "cp -r files/* openwrt/files/" step in .github/workflows/build.yml.
+.DS_Store
+._*
+
+# Agent workspace, never part of the firmware
+.kiro/
