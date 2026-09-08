@@ -196,15 +196,48 @@ config interface 'wan_cellular'
 	option auto '1'
 	option peerdns '1'
 	option defaultroute '1'
+	option mtu '1500'
 ```
 
 **`pdptype` must be `ipv4`, not `ip`.** OpenWrt 25.12's `mbim.sh` silently
 discards `ip`.
 
+**`mtu 1500` is set on evidence, not theory.** It is what the device runs under
+ROOTer, and a lower MTU breaks the owner's work VPN — an encapsulating tunnel
+needs the full 1500 underneath it, and path-MTU discovery frequently fails to
+negotiate the fragmentation a smaller outer MTU would require. Forcing 1500 is
+only harmful when the carrier's real MTU is lower, which is not the case on this
+carrier and APN; the symptom to watch for would be small requests working while
+large transfers and some HTTPS sites hang. MSS clamping (`mtu_fix` on the wan
+zone) is enabled independently and affects only TCP.
+
+### Network tuning
+
+| Setting | State | Why |
+| :--- | :--- | :--- |
+| MSS clamping (`mtu_fix`) | on | needed across the cellular boundary; TCP only |
+| `packet_steering` | on | the modem arrives over USB and IRQ handling otherwise pins to CPU0 |
+| Software flow offloading | **off** | ready to enable, but not in the same change as a new firmware — see below |
+| Hardware flow offloading | off | MT7621's PPE only accelerates flows between the switch's own Ethernet ports, so it cannot touch a USB MBIM WAN |
+
+Software offloading is a one-click enable under **Network → Firewall → Settings**
+once the baseline is confirmed working. It is shipped off because ROOTer runs
+without it and this device carries a VPN its owner depends on, so it should not
+be a candidate cause while a brand-new firmware is being evaluated. Two things
+to know before enabling it: offloaded flows bypass conntrack accounting, which is
+why data usage is tracked with `vnstat` (kernel interface counters) rather than a
+conntrack-based per-host tool; and offloading is incompatible with SQM shaping.
+
 Relevant packages from `diffconfig`: `umbim`, `luci-proto-mbim`,
 `kmod-usb-net-cdc-mbim`, `kmod-usb-wdm`, `kmod-usb-serial-option`,
 `kmod-usb-serial-wwan`, `usb-modeswitch`, `sms-tool`, `picocom`, `chat`,
-`comgt`, plus `luci-app-watchcat` and `kmod-nft-mangle`.
+`comgt`, plus `luci-app-watchcat`, `kmod-nft-mangle`, `vnstat2` /
+`luci-app-vnstat2` for data accounting, and `luci-app-commands`.
+
+Dark mode needs no package: `luci-theme-bootstrap` registers **Bootstrap**,
+**BootstrapDark** and **BootstrapLight**, selectable under **System → System →
+Language and Style**. `luci-theme-openwrt-2020` and `luci-theme-material` are
+also included as the more modern-looking official themes, both light-only.
 
 ---
 

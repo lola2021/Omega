@@ -47,9 +47,17 @@ config interface 'wan_cellular'
 	option auto '1'
 	option peerdns '1'
 	option defaultroute '1'
-	# MTU is deliberately NOT set. On MBIM the network dictates the usable MTU
-	# and netifd applies whatever the modem reports; pinning 1500 on a path whose
-	# real MTU is lower (carriers commonly hand out 1428-1500) black-holes large
-	# packets instead of raising throughput. MSS clamping on the wan zone
-	# (mtu_fix, already enabled) is what makes TCP behave across that boundary.
-	# After first boot, read the real value with: ip link show wwan0
+	# MTU 1500 is set deliberately, on evidence rather than theory: this is what
+	# the device runs under ROOTer today, and lowering it breaks the owner's work
+	# VPN -- an encapsulating tunnel needs the full 1500 underneath it, and when
+	# the outer MTU is smaller the tunnel's own packets need fragmentation that
+	# path-MTU discovery frequently fails to negotiate.
+	#
+	# Forcing 1500 is only harmful when the carrier's real MTU is lower, which
+	# would show up as small requests working while large transfers and some
+	# HTTPS sites hang. That is not the case on this carrier and APN. If it ever
+	# changes, compare against what the modem reports: ip link show wwan0
+	option mtu '1500'
+	# MSS clamping stays enabled on the wan zone (mtu_fix) regardless. It clamps
+	# TCP to the interface MTU and only affects TCP, so it does not interfere
+	# with a UDP or ESP tunnel.

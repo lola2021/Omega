@@ -3,19 +3,24 @@ config defaults
 	option input 'REJECT'
 	option output 'ACCEPT'
 	option forward 'REJECT'
-	# Software flow offloading. Moves established connections onto the kernel's
+	# Software flow offloading moves established connections onto the kernel's
 	# fast path and cuts routing CPU noticeably on a dual-core 880 MHz MIPS.
 	#
-	# Deliberately software only. MT7621's HARDWARE offload runs in the MT7530
-	# PPE, which can only accelerate flows between the switch's own Ethernet
-	# ports -- a USB MBIM interface is not something it can see, so on a
-	# cellular WAN hardware offload would add risk and accelerate nothing.
+	# Shipped OFF on purpose. ROOTer runs without it today, and this device
+	# carries a work VPN the owner depends on -- offloading changes how forwarded
+	# packets traverse the stack, so enabling it in the same change as a whole new
+	# firmware would make it a candidate cause for any tunnel misbehaviour.
+	# Confirm the baseline first, then enable it with one click under
+	# Network -> Firewall -> Settings and re-test the VPN.
 	#
-	# Offloaded flows bypass conntrack accounting, which is why data usage is
-	# tracked with vnstat (kernel interface counters) rather than a per-host
-	# conntrack accounting tool. Turn this off under Network -> Firewall if you
-	# later enable SQM, since traffic shaping and offloading are incompatible.
-	option flow_offloading '1'
+	# Note when you do: offloaded flows bypass conntrack accounting, which is why
+	# data usage here is tracked with vnstat (kernel interface counters) rather
+	# than a conntrack-based per-host tool. Offloading is also incompatible with
+	# SQM traffic shaping -- enable one or the other, not both.
+	option flow_offloading '0'
+	# Hardware offloading stays off regardless. MT7621's hardware path lives in
+	# the MT7530 PPE and can only accelerate flows between the switch's own
+	# Ethernet ports, so on a USB MBIM WAN it would accelerate nothing.
 	option flow_offloading_hw '0'
 
 config zone
