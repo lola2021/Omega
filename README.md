@@ -323,6 +323,20 @@ passes:
 serial lock like every other AT path; the watchdog adds no second poller and
 never touches `/dev/ttyUSB2` directly.
 
+**The reachability check has three states, and never pings unpinned.** Each
+tick reads the interface's `up` flag and its `l3_device` in one `ubus` call.
+(1) Interface **down** — do nothing: that is netifd's job and it is the normal
+state during the 20–60 s MBIM attach at boot, so a stall counter is reset
+rather than escalated. A practical consequence: the watchdog only ever acts on
+a connection that has already come up, so it will not fight the very first
+attach. (2) **Up with an `l3_device`** — the normal case: ping the targets
+*pinned to that device*, so a working Ethernet WAN on the default route cannot
+answer for a dead cellular link. (3) **Up but no `l3_device`** — an anomaly
+(netifd/MBIM reports up yet produced no routable device): log it once and do
+**not** escalate, because bouncing or restarting the modem underneath it is
+guesswork and the ladder must not climb into `ifdown`/`ifup` during an attach
+window. The ping is never run without a device.
+
 **There is no reboot rung, by decision.** A reboot-on-failure watchdog
 boot-loops when the stall has a cause a reboot cannot fix (APN, carrier block,
 SIM), so recovery stops at the modem restart.

@@ -44,6 +44,29 @@ expect 0 99 3 3 3
 # A threshold of 1 acts on the first failure.
 expect 0 1 1 0 1
 
+# --- check_reachable: the pin is mandatory --------------------------------
+# The actual finding-1 bug was an unpinned ping. Prove check_reachable never
+# runs ping at all when no device is given (so it can never follow the default
+# route through a working Ethernet WAN), by stubbing ping to record if called.
+PING_CALLED=0
+ping() { PING_CALLED=1; return 0; }
+
+if check_reachable '' '1.1.1.1 8.8.8.8' 1 3; then
+	echo "FAIL: check_reachable with no device should report unreachable" >&2
+	fails=$((fails + 1))
+fi
+if [ "$PING_CALLED" != "0" ]; then
+	echo "FAIL: check_reachable ran ping with no device (unpinned ping)" >&2
+	fails=$((fails + 1))
+fi
+
+# With a device it does ping (stub returns success -> reachable).
+if ! check_reachable 'wwan0' '1.1.1.1' 1 3; then
+	echo "FAIL: check_reachable with a device and a live target should be reachable" >&2
+	fails=$((fails + 1))
+fi
+unset -f ping
+
 if [ "$fails" -gt 0 ]; then
 	echo "$fails watchdog escalation test(s) failed" >&2
 	exit 1

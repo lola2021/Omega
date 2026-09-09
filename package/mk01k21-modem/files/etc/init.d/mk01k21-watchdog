@@ -74,14 +74,17 @@ next_rung() {
 
 # --- reachability check -----------------------------------------------------
 #
-# Down only when EVERY target fails, so a single dead host is not a false
-# alarm. Pinned to the cellular interface so a working LAN cannot mask a dead
-# WAN. Returns 0 (up) as soon as any target answers.
-
+# Reachable only when a target answers THROUGH the given cellular device. The
+# device is mandatory: an unpinned ping would follow the default route and a
+# working Ethernet WAN (dhcp, metric 20) would answer, so a dead cellular link
+# would look alive. The caller must therefore only reach here with a real
+# l3_device; "no device" is handled as a separate state, never by dropping the
+# pin. Down only when EVERY target fails, so one dead host is not a false alarm.
 check_reachable() {
 	local iface_dev="$1" targets="$2" count="$3" timeout="$4" t
+	[ -n "$iface_dev" ] || return 1
 	for t in $targets; do
-		if ping -q -c "$count" -W "$timeout" ${iface_dev:+-I "$iface_dev"} "$t" >/dev/null 2>&1; then
+		if ping -q -c "$count" -W "$timeout" -I "$iface_dev" "$t" >/dev/null 2>&1; then
 			return 0
 		fi
 	done
@@ -115,7 +118,7 @@ do_rung() {
 
 watch_loop() {
 	local interface interval threshold targets pcount ptimeout r2cool r3cool
-	local iface_dev fails last_rung rung cool
+	local status_json iface_up iface_dev fails last_rung anomaly rung cool
 
 	interface="$(modem_get interface wan_cellular)"
 	interval="$(wd_get interval 30)"
@@ -128,6 +131,7 @@ watch_loop() {
 
 	fails=0
 	last_rung=0
+	anomaly=0
 	printf 'up rung=0 fails=0\n' > "$STATE_FILE" 2>/dev/null
 
 	logger -t mk01k21-watchdog -p daemon.notice \
@@ -136,10 +140,41 @@ watch_loop() {
 	while :; do
 		sleep "$interval"
 
-		# Resolve the L3 device each tick: it changes across an ifdown/ifup.
-		iface_dev="$(ubus call "network.interface.$interface" status 2>/dev/null \
-			| sed -n 's/.*"l3_device": *"\([^"]*\)".*/\1/p' | head -n1)"
+		# One ubus read gives both the up flag and the L3 device. l3_device is
+		# re-read each tick because it changes across an ifdown/ifup.
+		status_json="$(ubus call "network.interface.$interface" status 2>/dev/null || printf '{}')"
+		iface_up="$(printf '%s' "$status_json" | sed -n 's/.*"up": *\(true\|false\).*/\1/p' | head -n1)"
+		iface_dev="$(printf '%s' "$status_json" | sed -n 's/.*"l3_device": *"\([^"]*\)".*/\1/p' | head -n1)"
 
+		# STATE 1 -- interface down. That is netifd's job, not the watchdog's,
+		# and it is the normal state during the 20-60s MBIM attach at boot.
+		# Escalating here would ifdown/ifup an interface that is already trying
+		# to come up. Reset any in-progress stall counting and wait.
+		if [ "$iface_up" != "true" ]; then
+			fails=0; last_rung=0; anomaly=0
+			printf 'iface-down rung=0 fails=0\n' > "$STATE_FILE" 2>/dev/null
+			continue
+		fi
+
+		# STATE 3 -- up but no L3 device. An anomaly: netifd/MBIM reports the
+		# interface up yet produced no routable device. Rungs 2 and 3 cannot fix
+		# that (bouncing or restarting the modem underneath it is guesswork; it
+		# is visible in logread), and, crucially, this must NOT feed the ladder
+		# -- counting it as a rung would let the next tick climb to ifdown/ifup
+		# during the very attach window where a missing device is normal. Log
+		# once on entry, leave fails and last_rung untouched, do not escalate.
+		if [ -z "$iface_dev" ]; then
+			if [ "$anomaly" != "1" ]; then
+				logger -t mk01k21-watchdog -p daemon.warn \
+					"$interface reports up but has no l3_device; not escalating (netifd/MBIM, see logread)"
+				anomaly=1
+			fi
+			printf 'anomaly rung=0 fails=0\n' > "$STATE_FILE" 2>/dev/null
+			continue
+		fi
+		anomaly=0
+
+		# STATE 2 -- up with a device: the normal case, ping pinned to it.
 		if check_reachable "$iface_dev" "$targets" "$pcount" "$ptimeout"; then
 			if [ "$last_rung" -gt 0 ]; then
 				logger -t mk01k21-watchdog -p daemon.notice \
