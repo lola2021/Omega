@@ -406,15 +406,21 @@ an absent one. None of the following exists yet:
 * **Band, RAT and cell locking.** The `AT+QNWPREFCFG` presets in the AT console
   can do this by hand today. A UI needs guard rails first: a bad cell lock can
   disconnect the modem until it is cleared.
-* **Status caching.** The status handler holds the lock across eight AT
-  commands, so two browser tabs contend and one is honestly told the modem is
-  busy.
+* **Status caching.** The status handler holds the lock across the whole AT
+  sweep — seventeen commands on page load (nine identity plus eight live) and
+  eight on every refresh — so two browser tabs contend and one is honestly told
+  the modem is busy. The `ubus` interface query and the `/sys/bus/usb` identity
+  walk also sit inside the lock without needing the serial port; that is untidy
+  rather than harmful, since the AT commands at an 8-second timeout each are
+  what actually holds it.
 
 Also open: the rpcd ACL grants write access to the whole `network` config
 because rpcd cannot scope narrower — fixing it needs a redesign of the profile
 save method. The Ethernet MAC is random each boot because the factory MAC is
-blank, and needs a UCI override after first boot. The operator is displayed as
-its numeric PLMN because `AT+COPS` reports format 2.
+blank, and needs a UCI override after first boot. On NR5G-NSA (EN-DC) the
+serving-cell field order has never been seen, so that technology reports only
+its identity fields and leaves every metric blank — deliberately, and until a
+real capture exists.
 
 ---
 
