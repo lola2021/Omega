@@ -447,10 +447,11 @@ JavaScriptCore, for machines without Node:
 
 ---
 
-## 8. Not implemented
+## 8. Gaps and known limitations
 
 Listed because a control that writes config and changes nothing is worse than
-an absent one. None of the following exists yet:
+an absent one. Some of the following do not exist at all; others exist but have
+named gaps, called out per item.
 
 * **SMS and USSD.** The **Modem → Messages** page can list, send and delete SMS
   in the modem's own storage, each through a narrow rpcd `sms` method behind the
