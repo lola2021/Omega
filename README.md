@@ -282,6 +282,7 @@ Two packages: `mk01k21-modem` (a data-only rpcd backend) and
 | **Network Status** | Signal metrics (RSRP/RSRQ/SINR/RSSI), serving cell, carrier aggregation, temperature, operator, modem and SIM identity with masking, and an AT-based "Restart modem" action |
 | **Connection Profile** | APN, PDP type, authentication, SIM PIN, MTU, metric, DNS |
 | **AT Console** | Send one validated AT command and read the response, with a preset list |
+| **Messages** | List, send and delete SMS in the modem's own storage, via a narrow rpcd `sms` method behind the serial lock (on-demand read, no background poll yet) |
 | **Settings** | AT port selection, identity masking |
 
 ### Serialisation
@@ -437,7 +438,15 @@ JavaScriptCore, for machines without Node:
 Listed because a control that writes config and changes nothing is worse than
 an absent one. None of the following exists yet:
 
-* **SMS and USSD.** `sms-tool` is installed but has no UI.
+* **SMS and USSD.** The **Modem → Messages** page can list, send and delete SMS
+  in the modem's own storage, each through a narrow rpcd `sms` method behind the
+  one serial lock (it shells `sms_tool -j recv` / `send` / `delete`, never the
+  port directly). Two gaps remain. USSD is not wired yet — `sms_tool ussd` is
+  the mechanism. And the inbox is **on-demand only**: opening the page runs one
+  locked `recv`, there is no background poll, so an unsolicited `+CMTI` arrival
+  is not surfaced until the next manual refresh. A poller is deliberately
+  deferred — it would contend with the status sweep for the lock and needs its
+  own careful design.
 * **Band, RAT and cell locking.** The `AT+QNWPREFCFG` presets in the AT console
   can do this by hand today. A UI needs guard rails first: a bad cell lock can
   disconnect the modem until it is cleared.

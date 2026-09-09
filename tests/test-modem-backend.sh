@@ -34,6 +34,30 @@ valid_uci_name 'wan6'
 ! valid_uci_name '../network'
 ! valid_uci_name ''
 
+# --- SMS input validation --------------------------------------------------
+valid_phone_number '+15550100000'
+valid_phone_number '15550100000'
+valid_phone_number '611'
+! valid_phone_number ''
+! valid_phone_number '+'
+! valid_phone_number '555-0100'
+! valid_phone_number '5550100000;reboot'
+! valid_phone_number '+1 555 0100'
+
+valid_sms_body 'hello'
+valid_sms_body "line one
+line two"
+! valid_sms_body ''
+! valid_sms_body "$(printf 'bad\001bell')"
+
+valid_sms_index '0'
+valid_sms_index '12'
+valid_sms_index 'all'
+! valid_sms_index ''
+! valid_sms_index '-1'
+! valid_sms_index 'all;reboot'
+! valid_sms_index '3.5'
+
 # --- locking ---------------------------------------------------------------
 # Exercised against a scratch directory so a real backend on this host is not
 # disturbed. These guard the invariant the whole design rests on: at most one

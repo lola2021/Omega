@@ -41,6 +41,17 @@
 			"acl": [ "luci-app-mk01k21-modem" ]
 		}
 	},
+	"admin/modem/sms": {
+		"title": "Messages",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "mk01k21-modem/sms"
+		},
+		"depends": {
+			"acl": [ "luci-app-mk01k21-modem" ]
+		}
+	},
 	"admin/modem/settings": {
 		"title": "Settings",
 		"order": 90,
