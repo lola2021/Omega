@@ -1,0 +1,86 @@
+#!/bin/sh
+# /usr/libexec/mk01k21-pcie0-power-probe
+#
+# A manual instrument for identifying GPIO 6. DELIBERATELY NOT A SERVICE, and
+# deliberately not in /etc/init.d.
+#
+# GPIO 6 is named "gpio_pcie0_power" in the OEM device tree, and PCIe0 carries
+# the MT7915 DBDC host interface. Driving this line therefore most likely cuts
+# power to BOTH Wi-Fi bands and does nothing whatsoever to the USB modem. The
+# device tree exports it under the historical name "modem-power"; that is a
+# legacy label, not a description.
+#
+# This file lived at /etc/init.d/modem-power until it was moved here, for two
+# reasons that only became clear on audit:
+#
+#   * /etc/uci-defaults ran "modem-power enable" at first boot. rc.common's
+#     enable creates an /etc/rc.d/K90 link as well as S15, so the shutdown
+#     sequence would have called stop() and written 1 to this line on every
+#     clean reboot. If GPIO 6 really is the PCIe0 rail, the plausible symptom
+#     is the MT7915 driver losing its device mid-teardown.
+#   * LuCI's System -> Startup page lists every script in /etc/init.d and offers
+#     Start / Restart / Stop on each row regardless of whether it is enabled.
+#     Removing the enable line alone would not have removed that one-click path.
+#
+# Modem recovery does not need this. Use the Restart modem action on the Modem
+# status page, which sends AT+CFUN=1,1 -- the same thing ROOTer effectively does
+# on this board, since ROOTer configures no modem-power GPIO here at all.
+#
+# Usage:
+#   mk01k21-pcie0-power-probe [status]   read the exported value; changes nothing
+#   mk01k21-pcie0-power-probe assert     write 0 (the value the DTS sets at boot)
+#   mk01k21-pcie0-power-probe deassert   write 1 -- SEE THE WARNING ABOVE. Do
+#                                        this only with console access and
+#                                        someone watching.
+#
+# "status" is the default so that an accidental bare invocation is read-only.
+
+GPIO_PATH=/sys/class/gpio/modem-power
+
+usage() {
+	echo "usage: ${0##*/} [status|assert|deassert]" >&2
+	exit 1
+}
+
+require_export() {
+	[ -e "$GPIO_PATH/value" ] || {
+		echo "${0##*/}: $GPIO_PATH/value does not exist -- the device tree" \
+			"gpio-export node is not present or is named differently" >&2
+		return 1
+	}
+}
+
+show() {
+	require_export || return 1
+	printf 'gpio-export %s value=%s\n' "$GPIO_PATH" "$(cat "$GPIO_PATH/value" 2>/dev/null)"
+}
+
+set_value() {
+	local value="$1"
+
+	require_export || return 1
+	[ -w "$GPIO_PATH/value" ] || {
+		echo "${0##*/}: $GPIO_PATH/value is not writable" >&2
+		return 1
+	}
+	echo "$value" > "$GPIO_PATH/value"
+}
+
+case "${1:-status}" in
+	status)
+		show
+		;;
+	assert)
+		# 0 is what the DTS gpio-export node already sets at boot, so this is
+		# normally a no-op and is the way back from "deassert".
+		set_value 0
+		;;
+	deassert)
+		echo "${0##*/}: writing 1 to GPIO 6. If this line is the PCIe0 rail," \
+			"both Wi-Fi bands may drop and the MT7915 driver may wedge." >&2
+		set_value 1
+		;;
+	*)
+		usage
+		;;
+esac

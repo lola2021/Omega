@@ -2,11 +2,26 @@
 # /etc/uci-defaults/99-cellular-setup
 # Automated first-boot setup for Mesh MK01K21 cellular modem & MBIM
 
-# The DTS gpio-export node owns GPIO 6 and boots the active-low modem power
-# line asserted. Enable the service only for deliberate later power cycles.
-[ -x /etc/init.d/modem-power ] && /etc/init.d/modem-power enable
+# Nothing is enabled for GPIO 6 here, deliberately.
+#
+# An earlier revision of this file ran "/etc/init.d/modem-power enable" on the
+# grounds that the DTS boots "the active-low modem power line asserted". That
+# description was wrong: the OEM device tree names GPIO 6 "gpio_pcie0_power" and
+# PCIe0 carries the MT7915 host interface, so the line has nothing to do with the
+# modem. Enabling the service also created an /etc/rc.d/K90 link, which would
+# have written 1 to that line on every clean shutdown.
+#
+# The tool that can drive the line now lives at
+# /usr/libexec/mk01k21-pcie0-power-probe and is not a service. Modem recovery is
+# AT-based (AT+CFUN=1,1), which is what ROOTer effectively does on this board.
 
-# Setup MBIM network interface if not present
+# Set up the MBIM interface if it is missing.
+#
+# files/etc/config/network already ships this section, so on a normal first boot
+# this branch does not run -- it is a fallback for a tree assembled without that
+# overlay. Keep the two in step. mtu 1500 in particular is load-bearing: see the
+# reasoning in that file, where a lower MTU is recorded as breaking the owner's
+# work VPN.
 if ! uci -q get network.wan_cellular >/dev/null; then
 	uci set network.wan_cellular=interface
 	uci set network.wan_cellular.proto='mbim'
@@ -17,13 +32,18 @@ if ! uci -q get network.wan_cellular >/dev/null; then
 	uci set network.wan_cellular.auto='1'
 	uci set network.wan_cellular.peerdns='1'
 	uci set network.wan_cellular.defaultroute='1'
+	uci set network.wan_cellular.mtu='1500'
 	uci commit network
 fi
 
-# Add wan_cellular to the wan firewall zone
-if uci -q get firewall.@zone[1] >/dev/null; then
-	uci add_list firewall.@zone[1].network='wan_cellular'
-	uci commit firewall
-fi
+# The firewall zone membership is NOT added here.
+#
+# files/etc/config/firewall already carries "list network 'wan_cellular'" on the
+# wan zone. An earlier revision additionally ran
+#   uci add_list firewall.@zone[1].network='wan_cellular'
+# which appended a second copy of a member that was already present -- libuci's
+# add_list does not de-duplicate -- and which also assumed that wan stays
+# anonymous zone index 1. Both problems disappear by letting the static overlay
+# be the single source of that membership.
 
 exit 0

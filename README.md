@@ -5,9 +5,13 @@ Brings the **Mesh MK01K21** 5G CPE from ROOTer (OpenWrt 22.03, Linux 5.10) to
 Quectel RM520N-GL modem so the device does not lose its cellular tooling in the
 move.
 
-**Status: built and validated, not yet flashed.** The most recent image passed
-the running router's own `sysupgrade` validation (checksum match, board name and
-compat version accepted, no force required). Everything in the
+**Status: CI-built and internally checked, not device-validated, not yet
+flashed.** An *earlier* image did pass the running router's own `sysupgrade`
+validation (checksum match, board name and compat version accepted, no force
+required), which is what establishes that the format, board name and compat
+metadata are right. No image built since has been put through that check, and
+the metadata has not changed in between. Run `sysupgrade -T` against whichever
+image you intend to flash before you flash it. Everything in the
 "[Unverified until first boot](#unverified-until-first-boot)" section below is
 exactly that — unverified.
 
@@ -129,8 +133,13 @@ gpio-export {
 The export keeps the historical name `modem-power`, which is misleading — treat
 the name as a legacy label, not a description. **Do not toggle this pin.** The
 LuCI "power cycle" button that used to drive it was removed for this reason;
-only the AT-based "Restart modem" action remains. `/etc/init.d/modem-power`
-survives as a shell-only tool for a future supervised experiment.
+only the AT-based "Restart modem" action remains.
+`/usr/libexec/mk01k21-pcie0-power-probe` survives as a shell-only instrument for
+a future supervised experiment. It is **not** an init script and not in
+`/etc/init.d`, on purpose: as a service it showed up on LuCI's **System →
+Startup** page with a one-click Stop, and first boot used to `enable` it, which
+creates an `/etc/rc.d/K90` link and so would have written to the line on every
+clean shutdown. Its default action is read-only.
 
 ### D. Flash layout
 
@@ -155,16 +164,36 @@ Wi-Fi band.
 | :--- | :--- | :--- | :--- |
 | `top:5gblue` | 14 (active low) | blinks while booting, solid when up | DTS `led-boot` / `led-running` alias, handled by `diag.sh` |
 | `top:5gred` | 15 | failsafe / sysupgrade | DTS `led-failsafe` / `led-upgrade` alias |
-| `blue:wifi` | 0 | Wi-Fi link and traffic | `netdev` trigger on `wlan0`, configured by `files/etc/uci-defaults/98-leds` |
+| `blue:wifi` | 0 | Wi-Fi **traffic** on phy0 | `phy0tpt` trigger, configured by `files/etc/uci-defaults/98-leds` |
 | `led:4gblue` | 11 | solid = **connected** | `mk01k21-modem-led` |
 | `led:4gorange` | 17 | 500 ms blink = searching · 200 ms = connecting | `mk01k21-modem-led` |
 | `led:5gblue` | 9 | solid = **on 5G NR** | `mk01k21-modem-led`, via the `rat` ubus method |
 | `led:5gorange` | 13 | solid = attached but not 5G | same |
 
 `mesh,mk01k21` is absent from upstream `board.d/01_leds`, so no LED config is
-generated at first boot — hence the explicit `uci-defaults` file. The `netdev`
-trigger itself needs no package: `CONFIG_LEDS_TRIGGER_NETDEV=y` is built into
-the generic 6.12 kernel.
+generated at first boot — hence the explicit `uci-defaults` file.
+
+**The Wi-Fi LED does not use ROOTer's configuration, and that is a correction.**
+ROOTer drives this lamp with the `netdev` trigger on `wlan0`, mode
+`link tx rx` — read off the running device with `uci show system`, and copied
+verbatim into this build at first. It cannot work here. OpenWrt 25.12's
+`wifi-scripts` default `ifname_prefix` to `"<phy>-"` and name a default AP
+`phy0-ap0`, so no interface is called `wlan0`, the trigger matches no device,
+and the lamp stays dark with nothing logged. ROOTer gets away with it because
+kernel 5.10 on 22.03 really does create a `wlan0`.
+
+`phy0tpt` binds to the phy instead of an interface name, so renaming cannot
+break it. It is an interim with two honest limitations: it shows **traffic, not
+link**, so the lamp is legitimately dark while Wi-Fi is up but idle; and it
+names `phy0`, which may be the 5 GHz radio on this DBDC chip. The intended
+replacement is a hotplug hook that resolves the real name at runtime — see
+[After first boot](#after-first-boot).
+
+The trigger needs no package. `CONFIG_MAC80211_LEDS` follows
+`CONFIG_LEDS_TRIGGERS`, which is enabled, and `/etc/init.d/led` writes an
+unrecognised trigger straight to sysfs and logs `Skipping trigger … due to
+missing kernel module` if the kernel rejects it — so unlike the `netdev`/`wlan0`
+case, a failure is visible in `logread`.
 
 The cellular state machine lives at
 `package/mk01k21-modem/files/usr/libexec/mk01k21-modem-led` and is driven by
@@ -307,26 +336,40 @@ technology code.
 **Do not build locally.** GitHub Actions is the only supported path; the
 workflow is `.github/workflows/build.yml`.
 
-Every build path targets `openwrt-25.12`. A push builds only on `main` /
-`master`, so work on a feature branch and dispatch explicitly:
+Every build path now targets the **`v25.12.5` release tag** — both the dispatch
+default and the push fallback. A push builds only on `main` / `master`, so work
+on a feature branch and dispatch explicitly:
 
 ```sh
 gh workflow run build.yml --ref <branch> \
-  -f openwrt_branch=openwrt-25.12 -f upload_release=false
+  -f openwrt_branch=v25.12.5 -f upload_release=false
 ```
 
-Or use **Actions → Build OpenWrt 25.12 for Mesh MK01K21 → Run workflow** in the
-web UI.
+The input also accepts a branch name or a full 40-character commit SHA. Prefer a
+tag or a SHA: a branch moves, so two builds a week apart are not the same source
+and neither can be reproduced afterwards.
 
 The workflow fails — rather than warns — if a package config check does not
 pass, if the image is missing or exceeds 16,449,536 bytes, or if the manifest
 does not contain `mk01k21-modem`, `luci-app-mk01k21-modem`, `umbim`,
 `sms-tool`, `jshn` and `rpcd`. The artifact contains the sysupgrade image,
-`SHA256SUMS.txt` and `config.buildinfo`.
+`SHA256SUMS.txt`, `config.buildinfo` and `BUILD_SOURCE.txt`.
 
-Last successful build: **8,847,905 bytes**, 53.8 % of the firmware partition,
-187 packages, kernel 6.12.103, OpenWrt 25.12-SNAPSHOT. Note the *snapshot*:
-this is a stabilising release branch, not a tagged release.
+**`BUILD_SOURCE.txt` records the resolved OpenWrt commit and this repository's
+commit, which is not the same thing as a reproducible build.** `feeds.conf.default`
+in the OpenWrt tree points the packages, LuCI, routing, telephony and video feeds
+at *moving branches*, and no feed revision is recorded anywhere in the artifact.
+So the core and this overlay are pinned, the feed inputs are not, and rebuilding
+the same core commit later can pull different LuCI and package sources. Locking
+them is possible — `./scripts/feeds list -s -f` emits a `feeds.conf` with each
+URL suffixed `^<sha>`, and `scripts/feeds` skips updating a feed pinned that way
+— but it is **not done yet**.
+
+Last successful build, from the *previous* core pin (`7114f29f`, a
+25.12-SNAPSHOT branch commit) rather than the tag this tree now targets:
+**9,962,020 bytes**, 60.6 % of the firmware partition, 200 packages, kernel
+6.12.103, mac80211 backports 6.18.39. Building the tag gives kernel 6.12.94 and
+backports 6.18.26 instead, so expect the figures and the checksum to move.
 
 ---
 
@@ -399,14 +442,52 @@ the LEDs. LuCI should answer well under a minute on subsequent boots, which is
 faster than ROOTer's three to four. Cellular data lags the web UI by 20–60 s
 while MBIM attaches. The build's LAN address is also `192.168.1.1`.
 
+### After first boot
+
+Three things are deliberately left for the device, because each needs a value
+that cannot be known before it runs.
+
+**Point the Wi-Fi LED at the real interface.** `98-leds` ships the `phy0tpt`
+trigger, which works without knowing any interface name but shows traffic
+rather than link. Read the actual name and check which phy is 2.4 GHz:
+
+```sh
+ls /sys/class/net                 # expect phy0-ap0 / phy1-ap0, not wlan0
+iw dev phy0-ap0 info              # 'channel' tells you the band
+```
+
+Then either switch back to a `netdev` trigger with the correct device:
+
+```sh
+uci set system.led_wifi0.trigger='netdev'
+uci set system.led_wifi0.dev='<the real name>'
+uci set system.led_wifi0.mode='link tx rx'
+uci commit system && /etc/init.d/led restart
+```
+
+or report the name so a hotplug hook can resolve it at runtime and the fix can
+be committed. `iw` is an unconditional dependency of `kmod-cfg80211`, so a hook
+can do band detection without `iwinfo`, which is only installed conditionally.
+
+**Set a stable Ethernet MAC.** The factory MAC cell is blank, so the address is
+random on every boot. Use the value on the device label if there is one.
+
+**Choose the Wi-Fi encryption.** No `/etc/config/wireless` is shipped, so this is
+a first-boot choice in **Network → Wireless**. `wpad-basic-mbedtls` is built with
+`CONFIG_SAE=y`, so **WPA3-Personal is available** — as is WPA2/WPA3 mixed, which
+is the safer pick if any client predates 802.11w (WPA3-SAE requires PMF, and a
+client that cannot do PMF will not associate at all). `CONFIG_OWE=y` is in the
+same variant if an encrypted open network is ever wanted.
+
 ### Unverified until first boot
 
-That it boots at all; which physical lamp each LED label drives; whether
-`wlan0` is the 2.4 GHz interface on this build; the reset button after the
-pinmux change; which physical jack is `lan1` versus `lan2`; SPI stability at
-50 MHz (`dmesg | grep -i squashfs` after a few hours); whether the first-boot
-`uci-defaults` applied (`uci show system`); and whether MBIM attaches with
-`pdptype ipv4`.
+That it boots at all; which physical lamp each LED label drives; whether `phy0`
+is the 2.4 GHz radio on this build (and what the AP interfaces are actually
+named); whether the `phy0tpt` trigger is accepted (`logread | grep -i trigger`);
+the reset button after the pinmux change; which physical jack is `lan1` versus
+`lan2`; SPI stability at 50 MHz (`dmesg | grep -i squashfs` after a few hours);
+whether the first-boot `uci-defaults` applied (`uci show system`); and whether
+MBIM attaches with `pdptype ipv4`.
 
 ---
 

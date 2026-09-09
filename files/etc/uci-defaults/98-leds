@@ -13,15 +13,40 @@
 # The four cellular LEDs are event-driven, not trigger-driven: see
 # /usr/libexec/mk01k21-modem-led and /etc/hotplug.d/iface/30-mk01k21-modem-led.
 
-# Wi-Fi: netdev trigger on the 2.4 GHz interface. CONFIG_LEDS_TRIGGER_NETDEV is
-# built into the OpenWrt kernel, so this needs no extra package.
+# Wi-Fi: mac80211's own phy throughput trigger, NOT the netdev trigger.
+#
+# ROOTer drives this lamp with trigger 'netdev', dev 'wlan0', mode 'link tx rx'
+# -- confirmed by reading "uci show system" on the running device, and that is
+# exactly what this file used to ship. It works on ROOTer because OpenWrt 22.03
+# on kernel 5.10 really does create a wlan0. It does NOT work here: 25.12's
+# wifi-scripts default ifname_prefix to "<phy>-" and name a default AP
+# phy0-ap0, so no interface is called wlan0, the netdev trigger matches no
+# device, and the lamp stays dark with nothing logged.
+#
+# phy0tpt binds to the phy rather than to an interface name, so renaming cannot
+# break it. Two limitations, accepted as an interim:
+#
+#   * it indicates traffic, not link, so the lamp is legitimately dark while
+#     Wi-Fi is up but idle. Do not read a dark lamp as broken Wi-Fi.
+#   * it names phy0, which may turn out to be the 5 GHz radio on this DBDC
+#     chip. Which phy carries 2.4 GHz cannot be known before the board boots.
+#
+# The intended replacement, once the real interface name has been read off the
+# device with "ls /sys/class/net", is a hotplug hook that resolves the name at
+# runtime. iw is an unconditional dependency of kmod-cfg80211, so that hook can
+# use "iw dev <name> info" for band detection rather than iwinfo, which is only
+# pulled in conditionally.
+#
+# CONFIG_MAC80211_LEDS follows CONFIG_LEDS_TRIGGERS, which is enabled, so the
+# trigger exists. /etc/init.d/led writes an unrecognised trigger straight to
+# sysfs and logs "Skipping trigger ... due to missing kernel module" if the
+# kernel rejects it, so unlike the netdev/wlan0 case a failure here is visible
+# in logread.
 if ! uci -q get system.led_wifi0 >/dev/null; then
 	uci set system.led_wifi0=led
 	uci set system.led_wifi0.name='WIFI'
 	uci set system.led_wifi0.sysfs='blue:wifi'
-	uci set system.led_wifi0.trigger='netdev'
-	uci set system.led_wifi0.dev='wlan0'
-	uci set system.led_wifi0.mode='link tx rx'
+	uci set system.led_wifi0.trigger='phy0tpt'
 	uci commit system
 fi
 

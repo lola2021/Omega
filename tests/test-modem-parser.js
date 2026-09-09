@@ -84,6 +84,32 @@ eq(qcsqBad.rsrq, -11, 'QCSQ plausible neighbour still reported');
 
 eq(Object.keys(parser.parseQcsq('ERROR')).length, 0, 'QCSQ error response yields nothing');
 
+/* A field the modem does not report must come back BLANK, never as 0.
+ *
+ * Regression fixtures. plausible() used to coerce before testing for null, and
+ * Number(null) is 0, so a '-' or an empty field became a confident 0 for every
+ * range containing zero -- SINR, RSRQ and ECIO. RSRP and RSSI were unaffected
+ * only because zero lies outside their ranges, which is luck rather than
+ * design. These are DOCUMENTED, not REAL: this modem has not been seen to emit
+ * '-' inside +QCSQ, and the one captured QCSQ response is complete. They guard
+ * the rule, which is blank over guess. */
+var qcsqDashSinr = parser.parseQcsq('+QCSQ: "NR5G",-75,-,-11\r\nOK');
+eq(qcsqDashSinr.rsrp, -75, 'QCSQ dash SINR leaves RSRP intact');
+isUndef(qcsqDashSinr.sinr, 'QCSQ dash SINR is blank, not 0');
+eq(qcsqDashSinr.rsrq, -11, 'QCSQ dash SINR leaves RSRQ intact');
+
+var qcsqDashRsrq = parser.parseQcsq('+QCSQ: "NR5G",-75,4,-\r\nOK');
+isUndef(qcsqDashRsrq.rsrq, 'QCSQ dash RSRQ is blank, not 0');
+eq(qcsqDashRsrq.sinr, 4, 'QCSQ dash RSRQ leaves SINR intact');
+
+var qcsqEmpty = parser.parseQcsq('+QCSQ: "NR5G",-75,,\r\nOK');
+isUndef(qcsqEmpty.sinr, 'QCSQ empty SINR field is blank, not 0');
+isUndef(qcsqEmpty.rsrq, 'QCSQ empty RSRQ field is blank, not 0');
+
+var qcsqWcdmaDash = parser.parseQcsq('+QCSQ: "WCDMA",-70,-85,-\r\nOK');
+isUndef(qcsqWcdmaDash.ecio, 'QCSQ dash ECIO is blank, not 0');
+eq(qcsqWcdmaDash.rscp, -85, 'QCSQ dash ECIO leaves RSCP intact');
+
 /* ----------------------------------------------------------------- AT+CSQ */
 
 /* REAL. 99 is the 3GPP "not known or not detectable" sentinel, which is what
@@ -154,6 +180,16 @@ var nsaCell = parser.parseServingCell(
 eq(nsaCell.mode, 'NR5G-NSA', 'EN-DC mode is still reported');
 isUndef(nsaCell.rsrp, 'EN-DC metrics are left blank rather than guessed');
 eq(nsaCell.band, undefined, 'EN-DC band is left blank rather than guessed');
+
+/* DOCUMENTED. Same rule on the QENG path: an unreported metric is blank. The
+ * real capture places its only '-' at index 16, which no layout field reads, so
+ * this variant moves one into the SINR slot to exercise the check. */
+var nrCellDash = parser.parseServingCell(
+	'+QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,18666712F,335,794E00,516270,41,12,-75,-11,-,1,-\r\nOK');
+eq(nrCellDash.rsrp, -75, 'QENG dash SINR leaves RSRP intact');
+eq(nrCellDash.rsrq, -11, 'QENG dash SINR leaves RSRQ intact');
+isUndef(nrCellDash.sinr, 'QENG dash SINR is blank, not 0');
+eq(nrCellDash.bandwidth, '100', 'QENG dash SINR leaves bandwidth decoding intact');
 
 deepEq(parser.parseServingCell('ERROR'), {}, 'QENG error response yields nothing');
 

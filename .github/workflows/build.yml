@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       openwrt_branch:
-        description: 'OpenWrt branch, tag, or full 40-char commit SHA (a SHA pins the build so it is reproducible)'
+        description: 'OpenWrt tag, branch, or full 40-char commit SHA. Defaults to the v25.12.5 release tag; a branch name is NOT reproducible because it moves.'
         required: true
-        default: 'openwrt-25.12'
+        default: 'v25.12.5'
         type: string
       upload_release:
         description: 'Publish GitHub Release on completion'
@@ -40,7 +40,7 @@ jobs:
           sh -n package/mk01k21-modem/files/usr/libexec/rpcd/mk01k21-modem
           sh -n package/mk01k21-modem/files/usr/libexec/mk01k21-modem-led
           sh -n package/mk01k21-modem/files/etc/hotplug.d/iface/30-mk01k21-modem-led
-          sh -n files/etc/init.d/modem-power
+          sh -n files/usr/libexec/mk01k21-pcie0-power-probe
           sh -n files/etc/uci-defaults/98-leds
           sh -n files/etc/uci-defaults/99-cellular-setup
           sh -n tests/test-modem-backend.sh
@@ -71,7 +71,11 @@ jobs:
 
       - name: Clone OpenWrt Source
         run: |
-          TARGET_REF="${{ github.event.inputs.openwrt_branch || 'openwrt-25.12' }}"
+          # A push build carries no dispatch input, so it falls back to this
+          # value. It is the release TAG, not a branch: a branch name moves, so
+          # two builds a week apart would not be the same source and neither
+          # could be reproduced afterwards.
+          TARGET_REF="${{ github.event.inputs.openwrt_branch || 'v25.12.5' }}"
           echo "Requested ref: $TARGET_REF"
 
           # "git clone -b" accepts a branch or a tag but NOT a commit, so a

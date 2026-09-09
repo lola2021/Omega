@@ -311,7 +311,10 @@ handle_power() {
 			# ships no configured modem-power GPIO for this board either and
 			# recovers over AT instead. Use the "restart" action; for
 			# deliberate, supervised identification of the line, invoke
-			# /etc/init.d/modem-power from a shell.
+			# /usr/libexec/mk01k21-pcie0-power-probe from a shell. It is
+			# deliberately not an init script: as a service it appeared on
+			# LuCI's System -> Startup page with a one-click Stop, and being
+			# enabled would have written to the line on every clean shutdown.
 			json_error "GPIO power cycling is disabled on this board: the modem power line is not identified"
 			return
 			;;

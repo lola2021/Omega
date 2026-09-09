@@ -36,9 +36,25 @@ function parseCsv(text) {
  * physically occupy. This is the guard that keeps a wrong field layout from
  * being rendered as a confident number: an out-of-range value is dropped, so
  * the UI shows a blank rather than a plausible-looking lie. */
+/* Range-check a derived metric, rejecting an absent value BEFORE coercing it.
+ *
+ * The order matters and an earlier revision had it backwards. Number(null) and
+ * Number('') are both 0, so coercing first turned a field the modem did not
+ * report into a confident 0 for every range that contains zero: SINR (-30..50),
+ * RSRQ (-40..0) and ECIO (-30..10). RSRP and RSSI escaped only by accident,
+ * because zero falls outside their ranges. The "value === null" test was still
+ * there but sat after the coercion, so it could never fire -- it documented the
+ * intent without performing it.
+ *
+ * Callers pass the output of numberOrNull, which maps both '' and the '-'
+ * sentinel to null, so null is the case that has to be caught here. */
 function plausible(value, low, high) {
+	if (value === null || value === undefined)
+		return undefined;
+	if (typeof value === 'string' && value.trim() === '')
+		return undefined;
 	value = Number(value);
-	if (value === null || isNaN(value) || value < low || value > high)
+	if (isNaN(value) || value < low || value > high)
 		return undefined;
 	return value;
 }
