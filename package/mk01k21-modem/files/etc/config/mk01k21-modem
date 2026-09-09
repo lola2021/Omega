@@ -7,6 +7,12 @@ config modem 'main'
 	option refresh_interval '30'
 	option mask_identifiers '1'
 	option at_timeout '8'
+	# SMS operations are NOT bounded by at_timeout: an SMS submit waits on the
+	# network's acknowledgement and a full-inbox recv can take tens of seconds,
+	# both routinely longer than the 8 s a single AT command is given. Killing
+	# sms_tool mid-send is the dangerous failure -- the message may already have
+	# gone, the UI reports failure, and the user sends it twice.
+	option sms_timeout '45'
 
 # Connection watchdog. OpenWrt's MBIM handler recovers from a clean link drop,
 # but not from "interface up, no data flowing" -- the common cellular stall.

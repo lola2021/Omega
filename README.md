@@ -441,12 +441,18 @@ an absent one. None of the following exists yet:
 * **SMS and USSD.** The **Modem → Messages** page can list, send and delete SMS
   in the modem's own storage, each through a narrow rpcd `sms` method behind the
   one serial lock (it shells `sms_tool -j recv` / `send` / `delete`, never the
-  port directly). Two gaps remain. USSD is not wired yet — `sms_tool ussd` is
-  the mechanism. And the inbox is **on-demand only**: opening the page runs one
-  locked `recv`, there is no background poll, so an unsolicited `+CMTI` arrival
-  is not surfaced until the next manual refresh. A poller is deliberately
-  deferred — it would contend with the status sweep for the lock and needs its
-  own careful design.
+  port directly). SMS operations use their own `sms_timeout` (default 45 s), not
+  the 8 s AT timeout, because a send waits on network acknowledgement. Three
+  gaps remain. The `sms_tool` **subcommands themselves are unverified on this
+  device** — `-j recv`, `send`, `delete <index|all>` and whether `delete all`
+  exists at all come from the tool's documented CLI, not a capture; a wrong
+  subcommand surfaces as "operation failed", which looks like a broken page
+  rather than an unverified assumption, so confirm them against the real modem.
+  USSD is not wired yet — `sms_tool ussd` is the mechanism. And the inbox is
+  **on-demand only**: opening the page runs one locked `recv`, there is no
+  background poll, so an unsolicited `+CMTI` arrival is not surfaced until the
+  next manual refresh. A poller is deliberately deferred — it would contend with
+  the status sweep for the lock and needs its own careful design.
 * **Band, RAT and cell locking.** The `AT+QNWPREFCFG` presets in the AT console
   can do this by hand today. A UI needs guard rails first: a bad cell lock can
   disconnect the modem until it is cleared.

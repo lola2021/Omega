@@ -43,4 +43,18 @@ define Package/mk01k21-modem/install
 	$(INSTALL_BIN) ./files/etc/init.d/mk01k21-watchdog $(1)/etc/init.d/mk01k21-watchdog
 endef
 
+# Enable the watchdog service so its rc.d links exist and toggling
+# `option enabled` in UCI is all that is needed to run it. This is safe here,
+# unlike the PCIe0 GPIO script: start_service self-gates on the config (enabled
+# '0' by default, so no instance starts until the user opts in), and
+# stop_service only removes a state file, so the K10 shutdown link is harmless.
+# Guarded to the on-device run, not the image build.
+define Package/mk01k21-modem/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+	/etc/init.d/mk01k21-watchdog enable 2>/dev/null || true
+}
+exit 0
+endef
+
 $(eval $(call BuildPackage,mk01k21-modem))

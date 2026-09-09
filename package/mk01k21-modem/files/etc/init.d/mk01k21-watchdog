@@ -58,6 +58,7 @@ modem_get() {
 # simply returns 0 in that case. While down, it climbs one rung at a time:
 # threshold reached -> rung 1, then 2, then 3, then holds at 3.
 next_rung() {
+	local up fails threshold last_rung
 	up="$1"; fails="$2"; threshold="$3"; last_rung="$4"
 
 	[ "$up" = "1" ] && { printf '0'; return; }
