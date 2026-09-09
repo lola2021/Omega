@@ -1,0 +1,191 @@
+#!/bin/sh /etc/rc.common
+# Connection watchdog for the Mesh MK01K21 RM520N cellular WAN.
+#
+# The gap this fills: OpenWrt's MBIM handler recovers from a clean link drop,
+# but not from "interface up, no data flowing" -- the common cellular stall.
+# This service checks reachability through the cellular interface and, when
+# data has really stopped, escalates through recovery rungs, stopping the
+# moment connectivity returns.
+#
+# Rungs, lightest first:
+#   1  log / mark degraded          -- no disruption
+#   2  ifdown + ifup <interface>    -- bounce the interface (~seconds)
+#   3  AT+CFUN=1,1                   -- soft-restart the modem (~20-60s)
+#
+# The reboot rung (4) is DELIBERATELY NOT IMPLEMENTED. A reboot-on-failure
+# watchdog boot-loops when the stall has a cause a reboot cannot fix (APN,
+# carrier block, SIM), and the owner chose to stop at the modem restart.
+#
+# Rung 3 does NOT open the serial port. All modem serial access goes through
+# the one lock in the rpcd backend, so rung 3 calls the existing "power"
+# ubus method (action=restart, which runs AT+CFUN=1,1 under that lock). This
+# service never touches /dev/ttyUSB2 directly and adds no second poller.
+
+START=95
+STOP=10
+USE_PROCD=1
+
+CONFIG_NAME=mk01k21-modem
+STATE_FILE=/tmp/mk01k21-watchdog.state
+
+# Under the test harness the file is sourced only to reach next_rung(); the
+# rc.common shebang runs the real init otherwise. Sourcing plain (not via
+# /etc/rc.common) means the procd_* helpers are absent, which is fine because
+# the test never calls start_service.
+
+# --- configuration reads (only used by the running service) ----------------
+
+wd_get() {
+	uci -q get "$CONFIG_NAME.watchdog.$1" 2>/dev/null || printf '%s' "$2"
+}
+
+modem_get() {
+	uci -q get "$CONFIG_NAME.main.$1" 2>/dev/null || printf '%s' "$2"
+}
+
+# --- pure escalation logic (unit-tested; no side effects) -------------------
+#
+# Decide the recovery rung to run given the current state. Kept free of ping,
+# ifdown and ubus so the state machine can be tested directly. Echoes the rung
+# to act on this tick (0 = do nothing), and never escalates past 3.
+#
+#   $1 up            1 if the last reachability check passed, else 0
+#   $2 fails         consecutive failed checks INCLUDING this one (0 if up)
+#   $3 threshold     failed checks required before the first rung
+#   $4 last_rung     the highest rung run since the stall began (0 if none)
+#
+# On recovery (up=1) the caller resets fails and last_rung to 0; this function
+# simply returns 0 in that case. While down, it climbs one rung at a time:
+# threshold reached -> rung 1, then 2, then 3, then holds at 3.
+next_rung() {
+	up="$1"; fails="$2"; threshold="$3"; last_rung="$4"
+
+	[ "$up" = "1" ] && { printf '0'; return; }
+	[ "$fails" -ge "$threshold" ] || { printf '0'; return; }
+
+	case "$last_rung" in
+		0) printf '1' ;;
+		1) printf '2' ;;
+		2) printf '3' ;;
+		*) printf '3' ;;
+	esac
+}
+
+# --- reachability check -----------------------------------------------------
+#
+# Down only when EVERY target fails, so a single dead host is not a false
+# alarm. Pinned to the cellular interface so a working LAN cannot mask a dead
+# WAN. Returns 0 (up) as soon as any target answers.
+
+check_reachable() {
+	local iface_dev="$1" targets="$2" count="$3" timeout="$4" t
+	for t in $targets; do
+		if ping -q -c "$count" -W "$timeout" ${iface_dev:+-I "$iface_dev"} "$t" >/dev/null 2>&1; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# --- recovery rungs ---------------------------------------------------------
+
+do_rung() {
+	local rung="$1" interface="$2"
+	case "$rung" in
+		1)
+			logger -t mk01k21-watchdog -p daemon.warn \
+				"cellular data stalled on $interface; monitoring (rung 1)"
+			;;
+		2)
+			logger -t mk01k21-watchdog -p daemon.warn \
+				"rung 2: bouncing $interface (ifdown/ifup)"
+			ifdown "$interface"; sleep 2; ifup "$interface"
+			;;
+		3)
+			logger -t mk01k21-watchdog -p daemon.err \
+				"rung 3: restarting modem via AT+CFUN=1,1 (rpcd power method, under serial lock)"
+			# Through the backend's lock -- never the serial port directly.
+			ubus call "$CONFIG_NAME" power '{"action":"restart"}' >/dev/null 2>&1
+			;;
+	esac
+}
+
+# --- the monitoring loop ----------------------------------------------------
+
+watch_loop() {
+	local interface interval threshold targets pcount ptimeout r2cool r3cool
+	local iface_dev fails last_rung rung cool
+
+	interface="$(modem_get interface wan_cellular)"
+	interval="$(wd_get interval 30)"
+	threshold="$(wd_get fail_threshold 3)"
+	targets="$(wd_get targets '1.1.1.1 8.8.8.8')"
+	pcount="$(wd_get ping_count 1)"
+	ptimeout="$(wd_get ping_timeout 3)"
+	r2cool="$(wd_get rung2_cooldown 45)"
+	r3cool="$(wd_get rung3_cooldown 60)"
+
+	fails=0
+	last_rung=0
+	printf 'up rung=0 fails=0\n' > "$STATE_FILE" 2>/dev/null
+
+	logger -t mk01k21-watchdog -p daemon.notice \
+		"watchdog started on $interface: every ${interval}s, ${threshold} fails to act, targets [$targets]"
+
+	while :; do
+		sleep "$interval"
+
+		# Resolve the L3 device each tick: it changes across an ifdown/ifup.
+		iface_dev="$(ubus call "network.interface.$interface" status 2>/dev/null \
+			| sed -n 's/.*"l3_device": *"\([^"]*\)".*/\1/p' | head -n1)"
+
+		if check_reachable "$iface_dev" "$targets" "$pcount" "$ptimeout"; then
+			if [ "$last_rung" -gt 0 ]; then
+				logger -t mk01k21-watchdog -p daemon.notice \
+					"cellular data recovered on $interface after rung $last_rung"
+			fi
+			fails=0; last_rung=0
+			printf 'up rung=0 fails=0\n' > "$STATE_FILE" 2>/dev/null
+			continue
+		fi
+
+		fails=$((fails + 1))
+		rung="$(next_rung 0 "$fails" "$threshold" "$last_rung")"
+		printf 'down rung=%s fails=%s\n' "$last_rung" "$fails" > "$STATE_FILE" 2>/dev/null
+
+		[ "$rung" = "0" ] && continue
+
+		do_rung "$rung" "$interface"
+		last_rung="$rung"
+		printf 'down rung=%s fails=%s\n' "$last_rung" "$fails" > "$STATE_FILE" 2>/dev/null
+
+		# Give the rung its chance to work before the next check.
+		case "$rung" in
+			2) cool="$r2cool" ;;
+			3) cool="$r3cool" ;;
+			*) cool=0 ;;
+		esac
+		[ "$cool" -gt 0 ] && sleep "$cool"
+	done
+}
+
+start_service() {
+	[ "$(wd_get enabled 0)" = "1" ] || {
+		logger -t mk01k21-watchdog -p daemon.notice "watchdog disabled in config; not starting"
+		return 0
+	}
+	procd_open_instance
+	procd_set_param command /bin/sh -c '. /etc/init.d/mk01k21-watchdog; watch_loop'
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger "$CONFIG_NAME"
+}
+
+stop_service() {
+	rm -f "$STATE_FILE"
+}

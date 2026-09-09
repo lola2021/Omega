@@ -7,3 +7,34 @@ config modem 'main'
 	option refresh_interval '30'
 	option mask_identifiers '1'
 	option at_timeout '8'
+
+# Connection watchdog. OpenWrt's MBIM handler recovers from a clean link drop,
+# but not from "interface up, no data flowing" -- the common cellular stall.
+# This service pings out through the cellular interface and, when data has
+# really stopped, escalates through recovery rungs, each heavier than the last,
+# stopping the moment connectivity returns.
+#
+# Disabled by default: it acts on the live data path, so it is opt-in. Every
+# value below is a starting default to be tuned against real device behaviour,
+# not a measured constant.
+#
+#   enabled          0/1, master switch (backs the mk_watchdog_disabled control)
+#   interval         seconds between reachability checks
+#   fail_threshold   consecutive failed checks before the first recovery rung
+#   targets          space-separated IPs; ALL must fail for a check to count as
+#                    down, so one dead host is not a false alarm
+#   ping_count       ICMP echoes per target per check
+#   ping_timeout     seconds to wait for a target to answer
+#   rung2_cooldown   seconds to let ifdown/ifup recover before rung 3 is tried
+#   rung3_cooldown   seconds to let AT+CFUN=1,1 re-attach before re-escalating
+#   max_reboot       reserved and unused: the reboot rung is deliberately NOT
+#                    built (see README section 8)
+config watchdog 'watchdog'
+	option enabled '0'
+	option interval '30'
+	option fail_threshold '3'
+	option targets '1.1.1.1 8.8.8.8'
+	option ping_count '1'
+	option ping_timeout '3'
+	option rung2_cooldown '45'
+	option rung3_cooldown '60'

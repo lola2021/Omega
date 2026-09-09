@@ -40,13 +40,16 @@ jobs:
           sh -n package/mk01k21-modem/files/usr/libexec/rpcd/mk01k21-modem
           sh -n package/mk01k21-modem/files/usr/libexec/mk01k21-modem-led
           sh -n package/mk01k21-modem/files/etc/hotplug.d/iface/30-mk01k21-modem-led
+          sh -n package/mk01k21-modem/files/etc/init.d/mk01k21-watchdog
           sh -n files/usr/libexec/mk01k21-pcie0-power-probe
           sh -n files/etc/uci-defaults/98-leds
           sh -n files/etc/uci-defaults/99-cellular-setup
           sh -n tests/test-modem-backend.sh
           sh -n tests/test-modem-leds.sh
+          sh -n tests/test-modem-watchdog.sh
           sh tests/test-modem-backend.sh
           sh tests/test-modem-leds.sh
+          sh tests/test-modem-watchdog.sh
           node tests/test-modem-parser.js
           python3 -m json.tool package/luci-app-mk01k21-modem/root/usr/share/luci/menu.d/luci-app-mk01k21-modem.json >/dev/null
           python3 -m json.tool package/luci-app-mk01k21-modem/root/usr/share/rpcd/acl.d/luci-app-mk01k21-modem.json >/dev/null

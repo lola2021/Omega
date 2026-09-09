@@ -301,6 +301,40 @@ modem call.
 The LED helper never opens the serial port itself. It calls a narrow `rat` ubus
 method that runs exactly one `AT+QNWINFO` under that same lock.
 
+### Connection watchdog
+
+OpenWrt's MBIM handler recovers from a clean link drop, but not from the common
+cellular stall — interface up, no data flowing. The `mk01k21-watchdog` procd
+service (`package/mk01k21-modem/files/etc/init.d/mk01k21-watchdog`) fills that
+gap: it pings out through the cellular interface and, when every target has
+failed for `fail_threshold` consecutive checks, escalates through recovery
+rungs, each heavier than the last, and drops back to idle the moment a check
+passes:
+
+| Rung | Action | Disruption |
+| :--- | :--- | :--- |
+| 1 | log / mark degraded | none |
+| 2 | `ifdown` + `ifup` the interface | seconds |
+| 3 | `AT+CFUN=1,1` — soft-restart the modem | ~20–60 s |
+
+**Rung 3 does not open the serial port.** It calls the backend's existing
+`power` ubus method (`action=restart`), so the modem restart runs under the one
+serial lock like every other AT path; the watchdog adds no second poller and
+never touches `/dev/ttyUSB2` directly.
+
+**There is no reboot rung, by decision.** A reboot-on-failure watchdog
+boot-loops when the stall has a cause a reboot cannot fix (APN, carrier block,
+SIM), so recovery stops at the modem restart.
+
+The service is **disabled by default** (`config watchdog` `option enabled '0'`
+in `/etc/config/mk01k21-modem`); it acts on the live data path, so it is
+opt-in. Every timing — interval, threshold, targets, per-rung cool-downs — is a
+UCI option with a starting default, not a value measured on this device; tune
+them once it runs on real hardware. Both targets (`1.1.1.1` and `8.8.8.8` by
+default) must fail for a check to count as down, so one dead host is not a false
+alarm. This is what backs the `mk_watchdog_disabled` control the UI can now
+carry honestly. `luci-app-watchcat` remains in the image as an alternative.
+
 ### AT parsing
 
 All parsing lives in one file,
@@ -383,6 +417,7 @@ backports 6.18.26 instead, so expect the figures and the checksum to move.
 ```sh
 sh tests/test-modem-backend.sh      # rpcd backend: locking, validation
 sh tests/test-modem-leds.sh         # LED state machine against a fake sysfs tree
+sh tests/test-modem-watchdog.sh     # watchdog escalation state machine
 node tests/test-modem-parser.js     # AT parser fixtures
 ```
 
@@ -402,11 +437,6 @@ JavaScriptCore, for machines without Node:
 Listed because a control that writes config and changes nothing is worse than
 an absent one. None of the following exists yet:
 
-* **A connection watchdog.** OpenWrt's MBIM handler recovers from clean
-  failures, but there is no ping keepalive, so the common cellular failure —
-  interface up, no data flowing — goes undetected. `luci-app-watchcat` ships in
-  the image as an interim measure: configure it under **Services → Watchcat**
-  against `wan_cellular`.
 * **SMS and USSD.** `sms-tool` is installed but has no UI.
 * **Band, RAT and cell locking.** The `AT+QNWPREFCFG` presets in the AT console
   can do this by hand today. A UI needs guard rails first: a bad cell lock can

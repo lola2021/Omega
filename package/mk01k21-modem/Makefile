@@ -20,7 +20,7 @@ endef
 
 define Package/mk01k21-modem/description
  Lightweight rpcd backend for Quectel RM520N status, AT commands,
- port discovery and AT-based modem restart.
+ port discovery, AT-based modem restart, and a connection watchdog.
 endef
 
 define Package/mk01k21-modem/conffiles
@@ -39,6 +39,8 @@ define Package/mk01k21-modem/install
 	$(INSTALL_BIN) ./files/usr/libexec/mk01k21-modem-led $(1)/usr/libexec/mk01k21-modem-led
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) ./files/etc/hotplug.d/iface/30-mk01k21-modem-led $(1)/etc/hotplug.d/iface/30-mk01k21-modem-led
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/mk01k21-watchdog $(1)/etc/init.d/mk01k21-watchdog
 endef
 
 $(eval $(call BuildPackage,mk01k21-modem))
