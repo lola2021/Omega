@@ -132,17 +132,17 @@ eq(csqReal.rssi, -73, 'CSQ to RSSI conversion');
  * this line with the LTE map shifted every column from 8 onward and displayed
  * the bandwidth index (12) as the RSRP. */
 var nrCell = parser.parseServingCell(
-	'+QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,18666712F,335,794E00,516270,41,12,-75,-11,5,1,-\r\nOK');
+	'+QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,1000000AF,100,123400,516270,41,12,-75,-11,5,1,-\r\nOK');
 eq(nrCell.mode, 'NR5G-SA', 'NR serving cell mode');
 eq(nrCell.state, 'NOCONN', 'NR serving cell state');
 eq(nrCell.duplex, 'TDD', 'NR duplex');
 eq(nrCell.mcc, '310', 'NR MCC');
 eq(nrCell.mnc, '260', 'NR MNC');
-eq(nrCell.cell_id, '18666712F', 'NR cell identity');
-eq(nrCell.cell_id_dec, '6549827887', 'NR cell identity in decimal');
+eq(nrCell.cell_id, '1000000AF', 'NR cell identity');
+eq(nrCell.cell_id_dec, '4294967471', 'NR cell identity in decimal');
 eq(nrCell.short_cell, undefined, 'NR NCI is not split into eNB/cell');
-eq(nrCell.pci, '335', 'NR PCI');
-eq(nrCell.tac, '794E00 (7949824)', 'NR TAC');
+eq(nrCell.pci, '100', 'NR PCI');
+eq(nrCell.tac, '123400 (1192960)', 'NR TAC');
 eq(nrCell.channel, '516270', 'NR ARFCN');
 eq(nrCell.band, '41', 'NR band');
 eq(nrCell.bandwidth, '100', 'NR bandwidth index 12 is 100 MHz');
@@ -158,13 +158,13 @@ eq(nrCell.rsrq, qcsqNr.rsrq, 'QENG and QCSQ agree on RSRQ');
 /* DOCUMENTED LTE order:
  *   ...,cellID, PCI, EARFCN, band, UL bw, DL bw, TAC, RSRP, RSRQ, RSSI, SINR, ... */
 var lteCell = parser.parseServingCell(
-	'+QENG: "servingcell","NOCONN","LTE","FDD",310,260,1A2B3C4,177,2000,4,5,5,794E,-92,-9,-63,14,10,23,-\r\nOK');
+	'+QENG: "servingcell","NOCONN","LTE","FDD",310,260,1A2B3C4,177,2000,4,5,5,1234,-92,-9,-63,14,10,23,-\r\nOK');
 eq(lteCell.mode, 'LTE', 'LTE mode');
 eq(lteCell.pci, '177', 'LTE PCI');
 eq(lteCell.channel, '2000', 'LTE EARFCN');
 eq(lteCell.band, '4', 'LTE band');
 eq(lteCell.bandwidth, '20', 'LTE DL bandwidth index 5 is 20 MHz');
-eq(lteCell.tac, '794E (31054)', 'LTE TAC');
+eq(lteCell.tac, '1234 (4660)', 'LTE TAC');
 eq(lteCell.rsrp, -92, 'LTE RSRP');
 eq(lteCell.rsrq, -9, 'LTE RSRQ');
 eq(lteCell.rssi, -63, 'LTE RSSI');
@@ -176,7 +176,7 @@ eq(lteCell.node_id, '1A2B3 (107187)', 'LTE ECI high bits are the eNB');
  * it reports only the unambiguous identity fields and blanks the metrics
  * rather than guessing at column positions. */
 var nsaCell = parser.parseServingCell(
-	'+QENG: "servingcell","NOCONN","NR5G-NSA",310,260,335,-80,9,-12,516270,41\r\nOK');
+	'+QENG: "servingcell","NOCONN","NR5G-NSA",310,260,100,-80,9,-12,516270,41\r\nOK');
 eq(nsaCell.mode, 'NR5G-NSA', 'EN-DC mode is still reported');
 isUndef(nsaCell.rsrp, 'EN-DC metrics are left blank rather than guessed');
 eq(nsaCell.band, undefined, 'EN-DC band is left blank rather than guessed');
@@ -185,7 +185,7 @@ eq(nsaCell.band, undefined, 'EN-DC band is left blank rather than guessed');
  * real capture places its only '-' at index 16, which no layout field reads, so
  * this variant moves one into the SINR slot to exercise the check. */
 var nrCellDash = parser.parseServingCell(
-	'+QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,18666712F,335,794E00,516270,41,12,-75,-11,-,1,-\r\nOK');
+	'+QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,1000000AF,100,123400,516270,41,12,-75,-11,-,1,-\r\nOK');
 eq(nrCellDash.rsrp, -75, 'QENG dash SINR leaves RSRP intact');
 eq(nrCellDash.rsrq, -11, 'QENG dash SINR leaves RSRQ intact');
 isUndef(nrCellDash.sinr, 'QENG dash SINR is blank, not 0');
@@ -196,13 +196,13 @@ deepEq(parser.parseServingCell('ERROR'), {}, 'QENG error response yields nothing
 /* ------------------------------------------------------------- AT+QCAINFO */
 
 /* REAL. One carrier: type, ARFCN, bandwidth index, band, PCI. */
-var carriers = parser.parseCaInfo('AT+QCAINFO\r\n+QCAINFO: "PCC",516270,12,"NR5G BAND 41",335\r\n\r\nOK\r\n');
+var carriers = parser.parseCaInfo('AT+QCAINFO\r\n+QCAINFO: "PCC",516270,12,"NR5G BAND 41",100\r\n\r\nOK\r\n');
 eq(carriers.length, 1, 'one aggregated carrier');
 eq(carriers[0].type, 'PCC', 'carrier type');
 eq(carriers[0].channel, '516270', 'carrier ARFCN');
 eq(carriers[0].band, 'NR5G BAND 41', 'carrier band');
 eq(carriers[0].bandwidth, '100', 'carrier bandwidth uses the NR table');
-eq(carriers[0].pci, '335', 'carrier PCI');
+eq(carriers[0].pci, '100', 'carrier PCI');
 eq(parser.formatCaInfo(carriers), 'PCC NR5G BAND 41 @ 100 MHz', 'carrier summary');
 eq(parser.formatCaInfo(parser.parseCaInfo('ERROR')), '', 'no carriers yields an empty summary');
 

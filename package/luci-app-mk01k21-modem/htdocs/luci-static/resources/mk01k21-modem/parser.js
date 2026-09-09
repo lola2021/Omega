@@ -181,10 +181,13 @@ function parseNetworkInfo(raw) {
  * the wrong map, every column after the sixth is shifted and the page displays
  * confident nonsense.
  *
- * NR5G_SA is verified byte-for-byte against a real RM520N-GL:
+ * NR5G_SA is verified byte-for-byte against a real RM520N-GL. The cell
+ * identity, TAC and PCI shown below are masked stand-ins (kept structurally
+ * identical so the hex/decimal decoding still exercises), not the captured
+ * values:
  *
- *   +QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,18666712F,335,
- *          794E00,516270,41,12,-75,-11,5,1,-
+ *   +QENG: "servingcell","NOCONN","NR5G-SA","TDD",310,260,1000000AF,100,
+ *          123400,516270,41,12,-75,-11,5,1,-
  *
  * Note that the TAC sits at index 8, BEFORE the ARFCN -- the opposite of the
  * LTE layout, where the TAC comes after the bandwidth pair. LTE is taken from
@@ -289,9 +292,9 @@ function parseServingCell(raw) {
 }
 
 /* AT+QCAINFO reports one line per aggregated carrier. Verified against the
- * real modem, which on a single NR5G-SA carrier answers:
+ * real modem, which on a single NR5G-SA carrier answers (PCI masked):
  *
- *   +QCAINFO: "PCC",516270,12,"NR5G BAND 41",335
+ *   +QCAINFO: "PCC",516270,12,"NR5G BAND 41",100
  *
  * i.e. <type>,<ARFCN>,<bandwidth index>,<band>,<PCI>. The bandwidth index uses
  * the NR table when the band string says NR5G, the LTE table otherwise. */

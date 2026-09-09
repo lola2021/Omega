@@ -306,7 +306,12 @@ method that runs exactly one `AT+QNWINFO` under that same lock.
 All parsing lives in one file,
 `package/luci-app-mk01k21-modem/htdocs/luci-static/resources/mk01k21-modem/parser.js`,
 and is fixture-tested against **real output captured from this project's own
-RM520N-GL** on T-Mobile NR5G-SA band n41. Two layout facts caused real bugs and
+RM520N-GL** on T-Mobile NR5G-SA band n41. The serving-cell identity, TAC and
+PCI in those fixtures are **masked** — replaced with structurally identical
+stand-ins so the hex/decimal decoding is still exercised, but the real tower
+identifiers are not committed. The signal metrics, ARFCN, band and layout
+positions are the genuine capture, because those are what the tests exist to
+pin. Two layout facts caused real bugs and
 are worth knowing before touching that file:
 
 * `AT+QCSQ` returns **four** fields on NR5G-SA — `RSRP, SINR, RSRQ`, with no
