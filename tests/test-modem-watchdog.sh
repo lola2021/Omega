@@ -67,6 +67,23 @@ if ! check_reachable 'wwan0' '1.1.1.1' 1 3; then
 fi
 unset -f ping
 
+# --- on_iface_down: a down tick must not clear an in-progress rung ---------
+# Finding A: interface-down is a state rung 2 (ifdown/ifup) causes, so clearing
+# last_rung there strands rung 3 for a slow-to-reattach modem. Down resets fails
+# and anomaly but PRESERVES last_rung.
+check_down() {
+	# check_down <last_rung_in> <want "fails last_rung anomaly">
+	got="$(on_iface_down "$1")"
+	if [ "$got" != "$2" ]; then
+		echo "FAIL: on_iface_down($1) expected '$2', got '$got'" >&2
+		fails=$((fails + 1))
+	fi
+}
+check_down 0 '0 0 0'    # at boot / no stall: stays 0
+check_down 1 '0 1 0'    # mid-stall after rung 1: rung remembered
+check_down 2 '0 2 0'    # after ifdown/ifup: rung 2 remembered, so next up-stall climbs to 3
+check_down 3 '0 3 0'    # rung 3 remembered
+
 if [ "$fails" -gt 0 ]; then
 	echo "$fails watchdog escalation test(s) failed" >&2
 	exit 1

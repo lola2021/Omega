@@ -72,6 +72,30 @@ next_rung() {
 	esac
 }
 
+# Compute the counter triple to carry into a State-1 (interface down) tick.
+# Echoes "<fails> <last_rung> <anomaly>".
+#
+# fails and anomaly reset -- the interface being down is not a data stall to
+# count, and the anomaly state does not apply while down. last_rung is PRESERVED
+# on purpose: interface-down is a state rung 2 (ifdown/ifup) CAUSES, so clearing
+# it here would wipe the ladder's memory in exactly the wedged-modem case rung 3
+# exists for -- the modem that is slow to re-attach would reset to zero, climb
+# from scratch, bounce the interface again and loop between rungs 1 and 2, with
+# AT+CFUN=1,1 never reached. last_rung is only ever non-zero while a stall is in
+# progress (the reachable branch clears it), so preserving it across a down
+# period is correct and it is already 0 at boot.
+#
+# Accepted consequence, stated rather than left to be discovered: after a long
+# genuine outage (SIM pulled for an hour) last_rung keeps its old value, so the
+# first action once service returns can be rung 3 rather than rung 1 -- it
+# remembers the gentler rungs already failed. Decaying last_rung after sustained
+# health would refine this, but that needs a measured window and is deferred; no
+# guessed decay is added here.
+on_iface_down() {
+	local last_rung="$1"
+	printf '0 %s 0' "$last_rung"
+}
+
 # --- reachability check -----------------------------------------------------
 #
 # Reachable only when a target answers THROUGH the given cellular device. The
@@ -149,10 +173,14 @@ watch_loop() {
 		# STATE 1 -- interface down. That is netifd's job, not the watchdog's,
 		# and it is the normal state during the 20-60s MBIM attach at boot.
 		# Escalating here would ifdown/ifup an interface that is already trying
-		# to come up. Reset any in-progress stall counting and wait.
+		# to come up. Reset the stall counter and the anomaly flag, but PRESERVE
+		# last_rung (see on_iface_down): down is a state rung 2 causes, so
+		# clearing the ladder here would strand rung 3 for a slow-to-reattach
+		# modem -- the exact case rung 3 exists for.
 		if [ "$iface_up" != "true" ]; then
-			fails=0; last_rung=0; anomaly=0
-			printf 'iface-down rung=0 fails=0\n' > "$STATE_FILE" 2>/dev/null
+			set -- $(on_iface_down "$last_rung")
+			fails="$1"; last_rung="$2"; anomaly="$3"
+			printf 'iface-down rung=%s fails=0\n' "$last_rung" > "$STATE_FILE" 2>/dev/null
 			continue
 		fi
 
