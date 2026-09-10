@@ -165,10 +165,16 @@ watch_loop() {
 		sleep "$interval"
 
 		# One ubus read gives both the up flag and the L3 device. l3_device is
-		# re-read each tick because it changes across an ifdown/ifup.
+		# re-read each tick because it changes across an ifdown/ifup. Parsed
+		# with jsonfilter (JsonPath), not sed: sed relied on BRE \| alternation
+		# (a GNU/busybox extension, not POSIX) and on the output staying
+		# multi-line -- a later switch to `ubus -S call` would have let the
+		# greedy leading .* silently take the LAST match. jsonfilter renders a
+		# JSON boolean as the literal true/false, so the != "true" test below is
+		# unchanged; an empty or unexpected value still reads as "not up".
 		status_json="$(ubus call "network.interface.$interface" status 2>/dev/null || printf '{}')"
-		iface_up="$(printf '%s' "$status_json" | sed -n 's/.*"up": *\(true\|false\).*/\1/p' | head -n1)"
-		iface_dev="$(printf '%s' "$status_json" | sed -n 's/.*"l3_device": *"\([^"]*\)".*/\1/p' | head -n1)"
+		iface_up="$(jsonfilter -s "$status_json" -e '@.up' 2>/dev/null)"
+		iface_dev="$(jsonfilter -s "$status_json" -e '@.l3_device' 2>/dev/null)"
 
 		# STATE 1 -- interface down. That is netifd's job, not the watchdog's,
 		# and it is the normal state during the 20-60s MBIM attach at boot.
